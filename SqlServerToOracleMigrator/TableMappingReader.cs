@@ -80,12 +80,16 @@ public class TableMappingReader
                         // D열: 설명 (선택사항)
                         var description = row.Cell(4).IsEmpty() ? null : row.Cell(4).GetString().Trim();
 
+                        // E열: WHERE 조건 (선택사항)
+                        var whereCondition = row.Cell(5).IsEmpty() ? null : row.Cell(5).GetString().Trim();
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
                             OracleTableName = oracleTable,
                             IsActive = isActive,
-                            Description = description
+                            Description = description,
+                            WhereCondition = whereCondition
                         };
 
                         mappings.Add(mapping);
@@ -129,6 +133,7 @@ public class TableMappingReader
                 worksheet.Cell(1, 2).Value = "Oracle 테이블명";
                 worksheet.Cell(1, 3).Value = "활성화";
                 worksheet.Cell(1, 4).Value = "설명";
+                worksheet.Cell(1, 5).Value = "WhereCondition";
 
                 // 헤더 스타일
                 var headerRow = worksheet.Row(1);
@@ -141,22 +146,26 @@ public class TableMappingReader
                 worksheet.Cell(2, 2).Value = "EMPLOYEES";
                 worksheet.Cell(2, 3).Value = "TRUE";
                 worksheet.Cell(2, 4).Value = "직원 정보 테이블";
+                worksheet.Cell(2, 5).Value = "IsActive = 1";
 
                 worksheet.Cell(3, 1).Value = "dbo.Departments";
                 worksheet.Cell(3, 2).Value = "DEPARTMENTS";
                 worksheet.Cell(3, 3).Value = "TRUE";
                 worksheet.Cell(3, 4).Value = "부서 정보 테이블";
+                worksheet.Cell(3, 5).Value = "";
 
                 worksheet.Cell(4, 1).Value = "dbo.Projects";
                 worksheet.Cell(4, 2).Value = "PROJECTS";
                 worksheet.Cell(4, 3).Value = "FALSE";
                 worksheet.Cell(4, 4).Value = "현재는 마이그레이션 제외";
+                worksheet.Cell(4, 5).Value = "Status = 'Completed'";
 
                 // 컬럼 너비 조정
                 worksheet.Column(1).Width = 25;
                 worksheet.Column(2).Width = 25;
                 worksheet.Column(3).Width = 12;
                 worksheet.Column(4).Width = 30;
+                worksheet.Column(5).Width = 40;
 
                 workbook.SaveAs(filePath);
                 _logger.LogInformation($"샘플 매핑 파일이 생성되었습니다: {filePath}");

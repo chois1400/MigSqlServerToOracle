@@ -25,8 +25,15 @@ public class TableMapping
     /// </summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// SQL Server에서 데이터를 추출할 때 사용할 WHERE 절 (예: "IsActive = 1 AND Region = 'KR'")
+    /// 빈 값이면 전체 데이터를 추출합니다.
+    /// </summary>
+    public string? WhereCondition { get; set; }
+
     public override string ToString()
     {
-        return $"{SqlServerTableName} -> {OracleTableName} ({(IsActive ? "활성" : "비활성")})";
+        var wherePart = string.IsNullOrWhiteSpace(WhereCondition) ? string.Empty : $" WHERE: {WhereCondition}";
+        return $"{SqlServerTableName} -> {OracleTableName} ({(IsActive ? "활성" : "비활성")}){wherePart}";
     }
 }

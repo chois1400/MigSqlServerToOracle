@@ -34,15 +34,15 @@ public class MigrationService
 
     /// <summary>
     /// Migrates a specific table from SQL Server to Oracle.
+    /// If a whereCondition is provided, it will be used in the SELECT statement to filter rows.
     /// </summary>
-    public async Task MigrateTableAsync(string sourceTable, string targetTable)
+    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null)
     {
         try
         {
             _logger.LogInformation($"Starting migration of table '{sourceTable}' -> '{targetTable}'");
-
             // Get row count
-            long totalRows = await GetRowCountAsync(sourceTable);
+            long totalRows = await GetRowCountAsync(sourceTable, whereCondition);
             _logger.LogInformation($"Total rows to migrate: {totalRows}");
 
             if (totalRows == 0)
@@ -65,7 +65,7 @@ public class MigrationService
 
                 try
                 {
-                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize);
+                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition);
                     migratedRows += currentBatchSize;
                     _logger.LogInformation($"Batch {batchNumber} completed. Total migrated: {migratedRows}/{totalRows}");
                 }
@@ -88,12 +88,13 @@ public class MigrationService
     /// <summary>
     /// Retrieves row count from SQL Server table.
     /// </summary>
-    private async Task<long> GetRowCountAsync(string tableName)
+    private async Task<long> GetRowCountAsync(string tableName, string? whereCondition = null)
     {
         using (var connection = new SqlConnection(_sqlServerConnectionString))
         {
             await connection.OpenAsync();
-            string query = $"SELECT COUNT(*) FROM {tableName}";
+            string whereClause = string.IsNullOrWhiteSpace(whereCondition) ? string.Empty : $" WHERE {whereCondition}";
+            string query = $"SELECT COUNT(*) FROM {tableName}{whereClause}";
             
             using (var command = new SqlCommand(query, connection))
             {
@@ -107,15 +108,16 @@ public class MigrationService
     /// <summary>
     /// Migrates a batch of data from SQL Server to Oracle.
     /// </summary>
-    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize)
+    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null)
     {
         using (var sqlConnection = new SqlConnection(_sqlServerConnectionString))
         {
             await sqlConnection.OpenAsync();
 
             // Read data from SQL Server with pagination
+            string whereClause = string.IsNullOrWhiteSpace(whereCondition) ? string.Empty : $" WHERE {whereCondition}";
             string query = $@"
-                SELECT * FROM {sourceTable}
+                SELECT * FROM {sourceTable}{whereClause}
                 ORDER BY (SELECT NULL)
                 OFFSET {offset} ROWS
                 FETCH NEXT {batchSize} ROWS ONLY";
@@ -272,7 +274,7 @@ public class MigrationService
                         _logger.LogInformation($"  설명: {mapping.Description}");
                     }
 
-                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName);
+                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition);
                     successCount++;
                     _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
                 }
@@ -337,7 +339,7 @@ public class MigrationService
                 }
 
                 // 테이블 마이그레이션 실행
-                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName);
+                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition);
                 successCount++;
                 _logger.LogInformation($"  ✓ 완료");
             }
