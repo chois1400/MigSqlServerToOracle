@@ -94,11 +94,32 @@ dotnet publish -c Release -o ./bin/Release/publish
 - 배치 크기: 1,000행
 - 트랜잭션 기반 처리
 
-### 시나리오 3: 대량 데이터 마이그레이션
+### 시나리오 3: Excel 매핑 파일을 사용한 마이그레이션 (새 기능)
+- Excel 파일에 테이블 매핑 정보 저장
+- 여러 테이블을 한 번에 마이그레이션
+- 활성화/비활성화 제어 가능
+
+#### 3-1: 샘플 Excel 파일 생성
+```csharp
+string mappingFilePath = Path.Combine(Directory.GetCurrentDirectory(), "TableMapping.xlsx");
+mappingReader.CreateSampleMappingFile(mappingFilePath);
+```
+
+#### 3-2: Excel 파일 읽기 및 마이그레이션
+```csharp
+string mappingFile = "TableMapping.xlsx";
+if (File.Exists(mappingFile))
+{
+    var mappings = mappingReader.ReadMappingsFromExcel(mappingFile);
+    await migrationService.MigrateWithMappingAsync(mappings);
+}
+```
+
+### 시나리오 4: 대량 데이터 마이그레이션
 - 배치 크기를 5,000 이상으로 증가
 - `MigrationSettings:BatchSize` 수정
 
-### 시나리오 4: 기존 데이터 재마이그레이션
+### 시나리오 5: 기존 데이터 재마이그레이션
 - `TruncateOracleTableAsync()` 호출하여 대상 테이블 초기화
 - 다시 마이그레이션 시작
 

@@ -238,4 +238,123 @@ public class MigrationService
             }
         }
     }
+
+    /// <summary>
+    /// Excel 매핑 파일을 기반으로 테이블을 마이그레이션합니다.
+    /// </summary>
+    public async Task MigrateWithMappingAsync(List<TableMapping> mappings)
+    {
+        try
+        {
+            _logger.LogInformation($"Excel 매핑을 기반으로 마이그레이션 시작합니다.");
+            _logger.LogInformation($"========================================");
+
+            // 활성화된 매핑만 필터링
+            var activeMappings = mappings.Where(m => m.IsActive).ToList();
+            _logger.LogInformation($"총 {mappings.Count}개 중 {activeMappings.Count}개의 활성 매핑을 처리합니다.");
+
+            if (activeMappings.Count == 0)
+            {
+                _logger.LogWarning("활성화된 매핑이 없습니다.");
+                return;
+            }
+
+            int successCount = 0;
+            int failureCount = 0;
+
+            foreach (var mapping in activeMappings)
+            {
+                try
+                {
+                    _logger.LogInformation($"마이그레이션 시작: {mapping.SqlServerTableName} -> {mapping.OracleTableName}");
+                    if (!string.IsNullOrEmpty(mapping.Description))
+                    {
+                        _logger.LogInformation($"  설명: {mapping.Description}");
+                    }
+
+                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName);
+                    successCount++;
+                    _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
+                }
+                catch (Exception ex)
+                {
+                    failureCount++;
+                    _logger.LogError($"✗ {mapping.SqlServerTableName} 마이그레이션 실패: {ex.Message}");
+                }
+            }
+
+            _logger.LogInformation($"========================================");
+            _logger.LogInformation($"마이그레이션 완료: 성공 {successCount}개, 실패 {failureCount}개");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Excel 매핑 기반 마이그레이션 중 오류 발생: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Excel 매핑 정보를 기반으로 테이블들을 마이그레이션합니다.
+    /// </summary>
+    public async Task MigrateTablesFromMappingAsync(List<TableMapping> mappings, bool truncateFirst = false)
+    {
+        if (!mappings.Any())
+        {
+            _logger.LogWarning("마이그레이션할 매핑 정보가 없습니다.");
+            return;
+        }
+
+        var activeMappings = mappings.Where(m => m.IsActive).ToList();
+        _logger.LogInformation($"========================================");
+        _logger.LogInformation($"마이그레이션 시작: {activeMappings.Count}개 테이블");
+        _logger.LogInformation($"========================================");
+
+        int successCount = 0;
+        int failureCount = 0;
+
+        foreach (var mapping in activeMappings)
+        {
+            try
+            {
+                _logger.LogInformation($"");
+                _logger.LogInformation($"[{successCount + failureCount + 1}/{activeMappings.Count}] 마이그레이션: {mapping.SqlServerTableName} -> {mapping.OracleTableName}");
+                if (!string.IsNullOrEmpty(mapping.Description))
+                {
+                    _logger.LogInformation($"  설명: {mapping.Description}");
+                }
+
+                // 선택적으로 대상 테이블 초기화
+                if (truncateFirst)
+                {
+                    try
+                    {
+                        await TruncateOracleTableAsync(mapping.OracleTableName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"테이블 초기화 실패: {ex.Message}. 계속 진행합니다.");
+                    }
+                }
+
+                // 테이블 마이그레이션 실행
+                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName);
+                successCount++;
+                _logger.LogInformation($"  ✓ 완료");
+            }
+            catch (Exception ex)
+            {
+                failureCount++;
+                _logger.LogError($"  ✗ 실패: {ex.Message}");
+                _logger.LogError($"  Stack Trace: {ex.StackTrace}");
+            }
+        }
+
+        _logger.LogInformation($"");
+        _logger.LogInformation($"========================================");
+        _logger.LogInformation($"마이그레이션 완료");
+        _logger.LogInformation($"  성공: {successCount}개 테이블");
+        _logger.LogInformation($"  실패: {failureCount}개 테이블");
+        _logger.LogInformation($"========================================");
+    }
 }
+
