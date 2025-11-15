@@ -1,0 +1,54 @@
+# Binaries
+bin/
+obj/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+
+# Visual Studio cache/options
+.vs/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Output folders
+publish/
+out/
+
+# ReSharper
+.idea/
+*.sln.iml
+
+# Entity Framework
+*.edmx
+*.edmx.diagram
+
+# NuGet
+.nuget/
+packages/
+*.nupkg
+*.snupkg
+
+# Local environment
+appsettings.local.json
+appsettings.Development.json
