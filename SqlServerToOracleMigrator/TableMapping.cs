@@ -31,9 +31,16 @@ public class TableMapping
     /// </summary>
     public string? WhereCondition { get; set; }
 
+    /// <summary>
+    /// Oracle 대상 테이블의 기존 데이터를 이전 전에 삭제(초기화)할지 여부.
+    /// Excel 파일의 6열에서 읽으며 TRUE/YES/1 형태를 허용합니다.
+    /// </summary>
+    public bool DeleteTarget { get; set; } = false;
+
     public override string ToString()
     {
         var wherePart = string.IsNullOrWhiteSpace(WhereCondition) ? string.Empty : $" WHERE: {WhereCondition}";
-        return $"{SqlServerTableName} -> {OracleTableName} ({(IsActive ? "활성" : "비활성")}){wherePart}";
+        var truncatePart = DeleteTarget ? " [TRUNCATE_TARGET]" : string.Empty;
+        return $"{SqlServerTableName} -> {OracleTableName} ({(IsActive ? "활성" : "비활성")}){wherePart}{truncatePart}";
     }
 }

@@ -24,6 +24,8 @@ public class TableMappingReader
     /// - B열: Oracle 테이블명 (예: EMPLOYEES)
     /// - C열 (선택): 활성화 여부 (TRUE/FALSE, 기본값: TRUE)
     /// - D열 (선택): 설명
+    /// - E열 (선택): WHERE 조건 (예: "IsActive = 1")
+    /// - F열 (선택): 대상 Oracle 테이블 초기화 여부 (TRUE/FALSE, 기본값: FALSE)
     /// </summary>
     public List<TableMapping> ReadMappingsFromExcel(string filePath)
     {
@@ -83,13 +85,23 @@ public class TableMappingReader
                         // E열: WHERE 조건 (선택사항)
                         var whereCondition = row.Cell(5).IsEmpty() ? null : row.Cell(5).GetString().Trim();
 
+                        // F열: 대상 Oracle 테이블 초기화 여부 (선택사항)
+                        bool deleteTarget = false;
+                        var deleteCell = row.Cell(6);
+                        if (!deleteCell.IsEmpty())
+                        {
+                            var deleteValue = deleteCell.GetString().Trim().ToUpper();
+                            deleteTarget = deleteValue is "TRUE" or "YES" or "1" or "O" or "삭제" or "TRUNCATE";
+                        }
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
                             OracleTableName = oracleTable,
                             IsActive = isActive,
                             Description = description,
-                            WhereCondition = whereCondition
+                            WhereCondition = whereCondition,
+                            DeleteTarget = deleteTarget
                         };
 
                         mappings.Add(mapping);
@@ -134,6 +146,7 @@ public class TableMappingReader
                 worksheet.Cell(1, 3).Value = "활성화";
                 worksheet.Cell(1, 4).Value = "설명";
                 worksheet.Cell(1, 5).Value = "WhereCondition";
+                worksheet.Cell(1, 6).Value = "TruncateTarget";
 
                 // 헤더 스타일
                 var headerRow = worksheet.Row(1);
@@ -147,18 +160,21 @@ public class TableMappingReader
                 worksheet.Cell(2, 3).Value = "TRUE";
                 worksheet.Cell(2, 4).Value = "직원 정보 테이블";
                 worksheet.Cell(2, 5).Value = "IsActive = 1";
+                worksheet.Cell(2, 6).Value = "TRUE";
 
                 worksheet.Cell(3, 1).Value = "dbo.Departments";
                 worksheet.Cell(3, 2).Value = "DEPARTMENTS";
                 worksheet.Cell(3, 3).Value = "TRUE";
                 worksheet.Cell(3, 4).Value = "부서 정보 테이블";
                 worksheet.Cell(3, 5).Value = "";
+                worksheet.Cell(3, 6).Value = "FALSE";
 
                 worksheet.Cell(4, 1).Value = "dbo.Projects";
                 worksheet.Cell(4, 2).Value = "PROJECTS";
                 worksheet.Cell(4, 3).Value = "FALSE";
                 worksheet.Cell(4, 4).Value = "현재는 마이그레이션 제외";
                 worksheet.Cell(4, 5).Value = "Status = 'Completed'";
+                worksheet.Cell(4, 6).Value = "FALSE";
 
                 // 컬럼 너비 조정
                 worksheet.Column(1).Width = 25;
@@ -166,6 +182,7 @@ public class TableMappingReader
                 worksheet.Column(3).Width = 12;
                 worksheet.Column(4).Width = 30;
                 worksheet.Column(5).Width = 40;
+                worksheet.Column(6).Width = 16;
 
                 workbook.SaveAs(filePath);
                 _logger.LogInformation($"샘플 매핑 파일이 생성되었습니다: {filePath}");

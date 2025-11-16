@@ -274,6 +274,20 @@ public class MigrationService
                         _logger.LogInformation($"  설명: {mapping.Description}");
                     }
 
+                    // 대상 테이블 초기화 플래그가 설정된 경우 삭제(초기화)
+                    if (mapping.DeleteTarget)
+                    {
+                        try
+                        {
+                            _logger.LogInformation($"  대상 테이블 초기화: {mapping.OracleTableName}");
+                            await TruncateOracleTableAsync(mapping.OracleTableName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"  대상 테이블 초기화 중 오류: {ex.Message}. 계속 진행합니다.");
+                        }
+                    }
+
                     await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition);
                     successCount++;
                     _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
@@ -325,11 +339,12 @@ public class MigrationService
                     _logger.LogInformation($"  설명: {mapping.Description}");
                 }
 
-                // 선택적으로 대상 테이블 초기화
-                if (truncateFirst)
+                // 선택적으로 대상 테이블 초기화 (전역 옵션 또는 매핑별 옵션)
+                if (truncateFirst || mapping.DeleteTarget)
                 {
                     try
                     {
+                        _logger.LogInformation($"  대상 테이블 초기화: {mapping.OracleTableName}");
                         await TruncateOracleTableAsync(mapping.OracleTableName);
                     }
                     catch (Exception ex)
