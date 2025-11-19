@@ -224,19 +224,41 @@ public class MigrationService
     }
 
     /// <summary>
-    /// Truncates an Oracle table (useful for re-running migrations).
+    /// Deletes all rows from an Oracle table (useful for re-running migrations).
     /// </summary>
-    public async Task TruncateOracleTableAsync(string tableName)
+    public async Task DeleteOracleTableAsync(string tableName)
     {
+        // 변경: TRUNCATE 대신 DELETE FROM을 사용하여 데이터를 삭제하도록 합니다.
+        // 이유: 일부 환경에서 TRUNCATE 권한이 없거나, 트랜잭션 관리를 명시적으로 하기 위함입니다.
         using (var connection = new OracleConnection(_oracleConnectionString))
         {
             await connection.OpenAsync();
 
-            using (var command = new OracleCommand($"TRUNCATE TABLE {tableName}", connection))
+            using (var transaction = connection.BeginTransaction())
             {
-                command.CommandTimeout = _commandTimeout;
-                await command.ExecuteNonQueryAsync();
-                _logger.LogInformation($"Truncated table '{tableName}' in Oracle");
+                try
+                {
+                    using (var command = new OracleCommand($"DELETE FROM {tableName}", connection))
+                    {
+                        command.Transaction = transaction;
+                        command.CommandTimeout = _commandTimeout;
+                        int affected = await command.ExecuteNonQueryAsync();
+                        _logger.LogInformation($"Deleted {affected} rows from '{tableName}' in Oracle");
+                    }
+
+                    await transaction.CommitAsync();
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        await transaction.RollbackAsync();
+                    }
+                    catch { }
+
+                    _logger.LogError($"Failed to delete rows from '{tableName}': {ex.Message}");
+                    throw;
+                }
             }
         }
     }
@@ -280,7 +302,7 @@ public class MigrationService
                         try
                         {
                             _logger.LogInformation($"  대상 테이블 초기화: {mapping.OracleTableName}");
-                            await TruncateOracleTableAsync(mapping.OracleTableName);
+                            await DeleteOracleTableAsync(mapping.OracleTableName);
                         }
                         catch (Exception ex)
                         {
@@ -345,7 +367,7 @@ public class MigrationService
                     try
                     {
                         _logger.LogInformation($"  대상 테이블 초기화: {mapping.OracleTableName}");
-                        await TruncateOracleTableAsync(mapping.OracleTableName);
+                        await DeleteOracleTableAsync(mapping.OracleTableName);
                     }
                     catch (Exception ex)
                     {

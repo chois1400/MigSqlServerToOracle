@@ -111,7 +111,7 @@ try
     //     {
     //         logger.LogInformation($"Migrating: {sourceTable} -> {targetTable}");
     //         // Optionally truncate existing data:
-    //         // await migrationService.TruncateOracleTableAsync(targetTable);
+    //         // await migrationService.DeleteOracleTableAsync(targetTable);
     //         await migrationService.MigrateTableAsync(sourceTable, targetTable);
     //         logger.LogInformation($"✓ {sourceTable} migrated successfully");
     //     }
@@ -137,7 +137,7 @@ try
     //     {
     //         logger.LogInformation($"Migrating: {sourceTable} -> {targetTable}");
     //         // Optionally truncate existing data:
-    //         // await migrationService.TruncateOracleTableAsync(targetTable);
+    //         // await migrationService.DeleteOracleTableAsync(targetTable);
     //         await migrationService.MigrateTableAsync(sourceTable, targetTable);
     //         logger.LogInformation($"✓ {sourceTable} migrated successfully");
     //     }

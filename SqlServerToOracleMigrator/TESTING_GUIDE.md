@@ -120,7 +120,7 @@ if (File.Exists(mappingFile))
 - `MigrationSettings:BatchSize` 수정
 
 ### 시나리오 5: 기존 데이터 재마이그레이션
-- `TruncateOracleTableAsync()` 호출하여 대상 테이블 초기화
+- `DeleteOracleTableAsync()` 호출하여 대상 테이블 초기화
 - 다시 마이그레이션 시작
 
 ## 마이그레이션 완료 후 검증

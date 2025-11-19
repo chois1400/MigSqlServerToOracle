@@ -84,7 +84,8 @@ mappingReader.CreateSampleMappingFile(mappingFilePath);
   - 예: `IsActive = 1`, `Region = 'KR'`, `HireDate > '2023-01-01'`
   - 빈 값이면 전체 데이터 추출
 - **F열**: TruncateTarget (선택사항, Oracle 대상 테이블 사전 초기화)
-  - `TRUE` 값이면 마이그레이션 전에 Oracle 테이블의 기존 데이터를 삭제(TRUNCATE)
+- **F열**: TruncateTarget (선택사항, Oracle 대상 테이블 사전 초기화)
+  - `TRUE` 값이면 마이그레이션 전에 Oracle 테이블의 기존 데이터를 삭제(DELETE FROM)
   - 기본값: `FALSE`
   - 허용 값: `TRUE`, `YES`, `1`, `O`, `삭제`, `TRUNCATE`
 
@@ -108,6 +109,7 @@ if (File.Exists(mappingFile))
 프로그램을 실행하면:
 - **활성화된 테이블만** 마이그레이션 수행
 - **TruncateTarget = TRUE인 테이블**: 마이그레이션 전에 Oracle 테이블 초기화
+- **TruncateTarget = TRUE인 테이블**: 마이그레이션 전에 Oracle 테이블 초기화 (DELETE FROM)
 - **WhereCondition이 설정된 테이블**: 해당 WHERE 조건으로 필터링된 데이터만 추출
 
 ## 사용 방법
@@ -137,7 +139,7 @@ dotnet run --configuration Debug
 - **GetSourceTablesAsync()**: SQL Server의 모든 테이블 목록 조회
 - **MigrateTableAsync(sourceTable, targetTable)**: 특정 테이블 마이그레이션 (배치 처리)
 - **MigrateWithMappingAsync(mappings)**: Excel 매핑 기반 마이그레이션 (NEW)
-- **TruncateOracleTableAsync(tableName)**: Oracle 테이블 데이터 삭제
+- **DeleteOracleTableAsync(tableName)**: Oracle 테이블 데이터 삭제
 
 ### TableMappingReader
 
@@ -151,7 +153,7 @@ dotnet run --configuration Debug
 - **IsActive**: 마이그레이션 활성화 여부
 - **Description**: 설명
 - **WhereCondition**: WHERE 절 (예: "IsActive = 1") - SQL Server에서 선택적으로 특정 행만 추출
-- **DeleteTarget**: Oracle 테이블 초기화 여부 - TRUE이면 마이그레이션 전에 대상 테이블을 TRUNCATE
+- **DeleteTarget**: Oracle 테이블 초기화 여부 - TRUE이면 마이그레이션 전에 대상 테이블의 데이터를 삭제(DELETE FROM)
 
 ## 배치 처리 방식
 
@@ -224,7 +226,7 @@ dotnet run --configuration Debug
 마이그레이션을 다시 실행하려면 다음과 같이 Oracle 테이블을 초기화합니다:
 
 ```csharp
-await migrationService.TruncateOracleTableAsync("YOUR_TABLE_NAME");
+await migrationService.DeleteOracleTableAsync("YOUR_TABLE_NAME");
 ```
 
 ## 로깅
@@ -291,7 +293,7 @@ dotnet run --configuration Debug
 
 - **GetSourceTablesAsync()**: SQL Server의 모든 테이블 목록 조회
 - **MigrateTableAsync(sourceTable, targetTable)**: 특정 테이블 마이그레이션 (배치 처리)
-- **TruncateOracleTableAsync(tableName)**: Oracle 테이블 데이터 삭제
+- **DeleteOracleTableAsync(tableName)**: Oracle 테이블 데이터 삭제
 
 ## 배치 처리 방식
 
@@ -330,7 +332,7 @@ dotnet run --configuration Debug
 마이그레이션을 다시 실행하려면 다음과 같이 Oracle 테이블을 초기화합니다:
 
 ```csharp
-await migrationService.TruncateOracleTableAsync("YOUR_TABLE_NAME");
+await migrationService.DeleteOracleTableAsync("YOUR_TABLE_NAME");
 ```
 
 ## 로깅
