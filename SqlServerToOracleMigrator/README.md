@@ -126,6 +126,18 @@ dotnet build
 dotnet run
 ```
 
+### 짧은 형태(명령줄 인수)
+
+```powershell
+dotnet run -- -c appsettings.json -m TableMapping.xlsx
+```
+
+또는 전체 경로 지정:
+
+```powershell
+dotnet run -- --config "C:\path\to\appsettings.json" --mapping "C:\path\to\TableMapping.xlsx"
+```
+
 ### 디버그 모드 실행
 
 ```bash

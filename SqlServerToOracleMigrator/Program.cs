@@ -3,11 +3,55 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SqlServerToOracleMigrator;
 
-// Load configuration
-var configuration = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .Build();
+// Parse command-line arguments for optional config and mapping file paths
+string? GetArgValue(string name)
+{
+    for (int i = 0; i < args.Length; i++)
+    {
+        var a = args[i];
+        if (a.StartsWith($"--{name}=") || a.StartsWith($"-{name}="))
+            return a.Substring(a.IndexOf('=') + 1).Trim('"');
+
+        if (a == $"--{name}" || a == $"-{name[0]}")
+            return i + 1 < args.Length ? args[i + 1].Trim('"') : null;
+    }
+    return null;
+}
+
+var configArg = GetArgValue("config") ?? GetArgValue("c");
+var mappingArg = GetArgValue("mapping") ?? GetArgValue("m");
+
+// If config not specified, ask user whether to continue with default 'appsettings.json'
+if (string.IsNullOrWhiteSpace(configArg))
+{
+    Console.Write("appsettings.json 경로를 지정하지 않았습니다. 기본 'appsettings.json'을 사용하여 계속 진행하시겠습니까? (Y/N): ");
+    var resp = Console.ReadLine()?.Trim().ToUpperInvariant();
+    if (resp != "Y" && resp != "YES")
+    {
+        Console.WriteLine("작업을 종료합니다.");
+        return;
+    }
+}
+
+// Build configuration (use provided path or default)
+var configBuilder = new ConfigurationBuilder();
+if (!string.IsNullOrWhiteSpace(configArg))
+{
+    var cfgPath = Path.IsPathRooted(configArg) ? configArg : Path.Combine(Directory.GetCurrentDirectory(), configArg);
+    if (!File.Exists(cfgPath))
+    {
+        Console.WriteLine($"지정된 설정 파일을 찾을 수 없습니다: {cfgPath}");
+        return;
+    }
+    configBuilder.AddJsonFile(cfgPath, optional: false, reloadOnChange: true);
+}
+else
+{
+    configBuilder.SetBasePath(Directory.GetCurrentDirectory())
+                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+}
+
+var configuration = configBuilder.Build();
 
 // Setup dependency injection
 var services = new ServiceCollection();
@@ -62,30 +106,75 @@ try
         Environment.Exit(1);
     }
 
-    // Example 2: Migrate tables using Excel mapping
-    // ===== OPTION A: Excel 매핑 파일을 사용하여 마이그레이션 =====
-    // 
-    // 먼저 샘플 파일 생성 (선택사항):
-    // mappingReader.CreateSampleMappingFile("TableMapping.xlsx");
-    //
-    // 그 다음 매핑 파일을 읽고 마이그레이션 실행:
-    // string mappingFilePath = "TableMapping.xlsx";
-    // try
-    // {
-    //     var mappings = mappingReader.ReadMappingsFromExcel(mappingFilePath);
-    //     if (mappings.Any())
-    //     {
-    //         logger.LogInformation($"\n'{mappingFilePath}'에서 {mappings.Count}개의 매핑 정보를 읽었습니다.");
-    //         
-    //         // truncateFirst = true 옵션: 마이그레이션 전 대상 테이블 초기화
-    //         await migrationService.MigrateTablesFromMappingAsync(mappings, truncateFirst: false);
-    //     }
-    // }
-    // catch (Exception ex)
-    // {
-    //     logger.LogError($"Excel 매핑 파일 처리 실패: {ex.Message}");
-    //     Environment.Exit(1);
-    // }
+    // Example 2: Migrate tables using Excel mapping (active flow)
+    // If a mapping file path was provided via --mapping/-m, use it. Otherwise ask user whether to proceed with default 'TableMapping.xlsx'.
+    try
+    {
+        string? mappingFileToUse = null;
+
+        if (!string.IsNullOrWhiteSpace(mappingArg))
+        {
+            mappingFileToUse = Path.IsPathRooted(mappingArg) ? mappingArg : Path.Combine(Directory.GetCurrentDirectory(), mappingArg);
+            if (!File.Exists(mappingFileToUse))
+            {
+                logger.LogError($"지정된 매핑 파일을 찾을 수 없습니다: {mappingFileToUse}");
+                mappingFileToUse = null;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(mappingFileToUse))
+        {
+            Console.Write("TableMapping.xlsx 경로를 지정하지 않았습니다. 기본 'TableMapping.xlsx'을 사용하여 매핑 기반 마이그레이션을 실행하시겠습니까? (Y/N): ");
+            var ans = Console.ReadLine()?.Trim().ToUpperInvariant();
+            if (ans == "Y" || ans == "YES")
+            {
+                var defaultPath = Path.Combine(Directory.GetCurrentDirectory(), "TableMapping.xlsx");
+                if (File.Exists(defaultPath))
+                {
+                    mappingFileToUse = defaultPath;
+                }
+                else
+                {
+                    Console.Write("기본 매핑 파일을 찾을 수 없습니다. 샘플 매핑 파일을 생성하시겠습니까? (Y/N): ");
+                    var createAns = Console.ReadLine()?.Trim().ToUpperInvariant();
+                    if (createAns == "Y" || createAns == "YES")
+                    {
+                        var samplePath = Path.Combine(Directory.GetCurrentDirectory(), "TableMapping.xlsx");
+                        mappingReader.CreateSampleMappingFile(samplePath);
+                        logger.LogInformation($"샘플 매핑 파일 생성됨: {samplePath}");
+                        mappingFileToUse = samplePath;
+                    }
+                    else
+                    {
+                        logger.LogInformation("매핑 기반 마이그레이션을 건너뜁니다.");
+                    }
+                }
+            }
+            else
+            {
+                logger.LogInformation("매핑 기반 마이그레이션을 건너뜁니다.");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(mappingFileToUse))
+        {
+            logger.LogInformation($"Excel 매핑 파일 사용: {mappingFileToUse}");
+            var mappings = mappingReader.ReadMappingsFromExcel(mappingFileToUse);
+            logger.LogInformation($"읽은 매핑 정보: {mappings.Count}개");
+            if (mappings.Any())
+            {
+                await migrationService.MigrateWithMappingAsync(mappings);
+            }
+            else
+            {
+                logger.LogWarning("매핑 정보가 비어있습니다. 매핑 파일을 확인하세요.");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError($"Excel 매핑 처리 중 오류: {ex.Message}");
+    }
 
     // Example 3: Migrate specific tables manually
     // ===== OPTION B: 수동으로 특정 테이블 마이그레이션 =====
