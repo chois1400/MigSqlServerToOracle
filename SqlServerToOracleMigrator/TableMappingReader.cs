@@ -26,6 +26,8 @@ public class TableMappingReader
     /// - D열 (선택): 설명
     /// - E열 (선택): WHERE 조건 (예: "IsActive = 1")
     /// - F열 (선택): 대상 Oracle 테이블 초기화 여부 (TRUE/FALSE, 기본값: FALSE)
+    /// - G열 (선택): SQL Server 컬럼명 목록 (쉼표로 구분, 예: "EmployeeID,EmployeeName")
+    /// - H열 (선택): Oracle 컬럼명 목록 (쉼표로 구분, 예: "EMP_ID,EMP_NAME")
     /// </summary>
     public List<TableMapping> ReadMappingsFromExcel(string filePath)
     {
@@ -94,6 +96,33 @@ public class TableMappingReader
                             deleteTarget = deleteValue is "TRUE" or "YES" or "1" or "O" or "삭제" or "TRUNCATE";
                         }
 
+                        // G열: SQL Server 컬럼명 목록 (쉼표로 구분)
+                        // H열: Oracle 컬럼명 목록 (쉼표로 구분)
+                        var columnMappings = new Dictionary<string, string>();
+                        var sqlServerColumns = row.Cell(7).IsEmpty() ? null : row.Cell(7).GetString().Trim();
+                        var oracleColumns = row.Cell(8).IsEmpty() ? null : row.Cell(8).GetString().Trim();
+
+                        if (!string.IsNullOrWhiteSpace(sqlServerColumns) && !string.IsNullOrWhiteSpace(oracleColumns))
+                        {
+                            var sqlCols = sqlServerColumns.Split(',').Select(c => c.Trim()).ToList();
+                            var oracleCols = oracleColumns.Split(',').Select(c => c.Trim()).ToList();
+
+                            if (sqlCols.Count == oracleCols.Count)
+                            {
+                                for (int i = 0; i < sqlCols.Count; i++)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(sqlCols[i]) && !string.IsNullOrWhiteSpace(oracleCols[i]))
+                                    {
+                                        columnMappings[sqlCols[i]] = oracleCols[i];
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"행 {rowNumber}: SQL Server 컬럼 개수({sqlCols.Count})와 Oracle 컬럼 개수({oracleCols.Count})가 다릅니다.");
+                            }
+                        }
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
@@ -101,7 +130,8 @@ public class TableMappingReader
                             IsActive = isActive,
                             Description = description,
                             WhereCondition = whereCondition,
-                            DeleteTarget = deleteTarget
+                            DeleteTarget = deleteTarget,
+                            ColumnMappings = columnMappings
                         };
 
                         mappings.Add(mapping);
@@ -110,7 +140,7 @@ public class TableMappingReader
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"행 {rowNumber}을 처리하는 중 오류 발생: {ex.Message}. 건너뜀.");
+                        _logger.LogWarning($"행 {rowNumber}을를 처리하는 중 오류 발생: {ex.Message}. 건너뜀.");
                     }
 
                     rowNumber++;
@@ -147,6 +177,8 @@ public class TableMappingReader
                 worksheet.Cell(1, 4).Value = "설명";
                 worksheet.Cell(1, 5).Value = "WhereCondition";
                 worksheet.Cell(1, 6).Value = "TruncateTarget";
+                worksheet.Cell(1, 7).Value = "SQL Server 컬럼명";
+                worksheet.Cell(1, 8).Value = "Oracle 컬럼명";
 
                 // 헤더 스타일
                 var headerRow = worksheet.Row(1);
@@ -161,6 +193,8 @@ public class TableMappingReader
                 worksheet.Cell(2, 4).Value = "직원 정보 테이블";
                 worksheet.Cell(2, 5).Value = "IsActive = 1";
                 worksheet.Cell(2, 6).Value = "TRUE";
+                worksheet.Cell(2, 7).Value = "EmployeeID,EmployeeName";
+                worksheet.Cell(2, 8).Value = "EMP_ID,EMP_NAME";
 
                 worksheet.Cell(3, 1).Value = "dbo.Departments";
                 worksheet.Cell(3, 2).Value = "DEPARTMENTS";
@@ -168,6 +202,8 @@ public class TableMappingReader
                 worksheet.Cell(3, 4).Value = "부서 정보 테이블";
                 worksheet.Cell(3, 5).Value = "";
                 worksheet.Cell(3, 6).Value = "FALSE";
+                worksheet.Cell(3, 7).Value = "";
+                worksheet.Cell(3, 8).Value = "";
 
                 worksheet.Cell(4, 1).Value = "dbo.Projects";
                 worksheet.Cell(4, 2).Value = "PROJECTS";
@@ -175,6 +211,8 @@ public class TableMappingReader
                 worksheet.Cell(4, 4).Value = "현재는 마이그레이션 제외";
                 worksheet.Cell(4, 5).Value = "Status = 'Completed'";
                 worksheet.Cell(4, 6).Value = "FALSE";
+                worksheet.Cell(4, 7).Value = "";
+                worksheet.Cell(4, 8).Value = "";
 
                 // 컬럼 너비 조정
                 worksheet.Column(1).Width = 25;
@@ -183,6 +221,8 @@ public class TableMappingReader
                 worksheet.Column(4).Width = 30;
                 worksheet.Column(5).Width = 40;
                 worksheet.Column(6).Width = 16;
+                worksheet.Column(7).Width = 35;
+                worksheet.Column(8).Width = 35;
 
                 workbook.SaveAs(filePath);
                 _logger.LogInformation($"샘플 매핑 파일이 생성되었습니다: {filePath}");

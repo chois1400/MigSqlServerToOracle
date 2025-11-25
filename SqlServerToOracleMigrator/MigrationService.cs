@@ -35,12 +35,17 @@ public class MigrationService
     /// <summary>
     /// Migrates a specific table from SQL Server to Oracle.
     /// If a whereCondition is provided, it will be used in the SELECT statement to filter rows.
+    /// If columnMappings is provided, column names will be mapped during INSERT.
     /// </summary>
-    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null)
+    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null)
     {
         try
         {
             _logger.LogInformation($"Starting migration of table '{sourceTable}' -> '{targetTable}'");
+            if (columnMappings?.Count > 0)
+            {
+                _logger.LogInformation($"  Column mappings: {columnMappings.Count} columns mapped");
+            }
             // Get row count
             long totalRows = await GetRowCountAsync(sourceTable, whereCondition);
             _logger.LogInformation($"Total rows to migrate: {totalRows}");
@@ -65,7 +70,7 @@ public class MigrationService
 
                 try
                 {
-                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition);
+                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition, columnMappings);
                     migratedRows += currentBatchSize;
                     _logger.LogInformation($"Batch {batchNumber} completed. Total migrated: {migratedRows}/{totalRows}");
                 }
@@ -108,7 +113,7 @@ public class MigrationService
     /// <summary>
     /// Migrates a batch of data from SQL Server to Oracle.
     /// </summary>
-    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null)
+    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null, Dictionary<string, string>? columnMappings = null)
     {
         using (var sqlConnection = new SqlConnection(_sqlServerConnectionString))
         {
@@ -134,7 +139,7 @@ public class MigrationService
                         return;
 
                     // Insert into Oracle
-                    await InsertIntoOracleAsync(targetTable, dataTable);
+                    await InsertIntoOracleAsync(targetTable, dataTable, columnMappings);
                 }
             }
         }
@@ -143,8 +148,9 @@ public class MigrationService
     /// <summary>
     /// Inserts data into Oracle table.
     /// Maps SQL Server data types to Oracle equivalents.
+    /// Supports column mapping if provided (SQL Server column name -> Oracle column name).
     /// </summary>
-    private async Task InsertIntoOracleAsync(string tableName, DataTable dataTable)
+    private async Task InsertIntoOracleAsync(string tableName, DataTable dataTable, Dictionary<string, string>? columnMappings = null)
     {
         using (var oracleConnection = new OracleConnection(_oracleConnectionString))
         {
@@ -156,9 +162,34 @@ public class MigrationService
                 {
                     foreach (DataRow row in dataTable.Rows)
                     {
-                        // Build INSERT statement dynamically
-                        var columnNames = string.Join(", ", dataTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName));
-                        var parameterNames = string.Join(", ", dataTable.Columns.Cast<DataColumn>().Select((c, i) => $":p{i}"));
+                        // 컬럼명 유효성 검사 및 Oracle 식별자 쌍따옴표 처리
+                        var validColumns = dataTable.Columns.Cast<DataColumn>()
+                            .Where(c => !string.IsNullOrWhiteSpace(c.ColumnName) && c.ColumnName.All(ch => char.IsLetterOrDigit(ch) || ch == '_'))
+                            .ToList();
+
+                        if (validColumns.Count == 0)
+                        {
+                            _logger.LogWarning($"[{tableName}] 컬럼명이 비어있거나 유효하지 않아 INSERT를 건너뜁니다.");
+                            continue;
+                        }
+
+                        // 컬럼 매핑 적용: SQL Server 컬럼명 -> Oracle 컬럼명
+                        var mappedColumns = validColumns.Select(c =>
+                        {
+                            var oracleColName = columnMappings?.ContainsKey(c.ColumnName) == true 
+                                ? columnMappings[c.ColumnName] 
+                                : c.ColumnName;
+                            return new { Source = c.ColumnName, Target = oracleColName };
+                        }).ToList();
+
+                        var columnNames = string.Join(", ", mappedColumns.Select(c => $"\"{c.Target}\""));
+                        var parameterNames = string.Join(", ", mappedColumns.Select((c, i) => $":p{i}"));
+
+                        if (string.IsNullOrWhiteSpace(columnNames) || string.IsNullOrWhiteSpace(parameterNames))
+                        {
+                            _logger.LogWarning($"[{tableName}] INSERT 구문 생성 실패: 컬럼 또는 파라미터가 비어있음");
+                            continue;
+                        }
 
                         string insertQuery = $"INSERT INTO {tableName} ({columnNames}) VALUES ({parameterNames})";
 
@@ -167,10 +198,12 @@ public class MigrationService
                             command.Transaction = transaction;
                             command.CommandTimeout = _commandTimeout;
 
-                            // Add parameters with type mapping
-                            for (int i = 0; i < dataTable.Columns.Count; i++)
+                            // Add parameters with type mapping (valid columns만)
+                            for (int i = 0; i < validColumns.Count; i++)
                             {
-                                var value = row[i] == DBNull.Value ? null : row[i];
+                                var sourceColName = validColumns[i].ColumnName;
+                                var colIdx = dataTable.Columns.IndexOf(sourceColName);
+                                var value = row[colIdx] == DBNull.Value ? null : row[colIdx];
                                 command.Parameters.Add($":p{i}", value ?? DBNull.Value);
                             }
 
@@ -310,7 +343,7 @@ public class MigrationService
                         }
                     }
 
-                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition);
+                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings);
                     successCount++;
                     _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
                 }
@@ -376,7 +409,7 @@ public class MigrationService
                 }
 
                 // 테이블 마이그레이션 실행
-                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition);
+                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings);
                 successCount++;
                 _logger.LogInformation($"  ✓ 완료");
             }

@@ -37,10 +37,17 @@ public class TableMapping
     /// </summary>
     public bool DeleteTarget { get; set; } = false;
 
+    /// <summary>
+    /// SQL Server 컬럼명 -> Oracle 컬럼명 매핑 (Key: SQL Server 컬럼명, Value: Oracle 컬럼명)
+    /// 테이블의 컬럼명이 다를 경우에 사용됩니다. 빈 경우 1:1 매핑을 가정합니다.
+    /// </summary>
+    public Dictionary<string, string> ColumnMappings { get; set; } = new();
+
     public override string ToString()
     {
         var wherePart = string.IsNullOrWhiteSpace(WhereCondition) ? string.Empty : $" WHERE: {WhereCondition}";
         var truncatePart = DeleteTarget ? " [TRUNCATE_TARGET]" : string.Empty;
-        return $"{SqlServerTableName} -> {OracleTableName} ({(IsActive ? "활성" : "비활성")}){wherePart}{truncatePart}";
+        var mappingPart = ColumnMappings.Count > 0 ? $" [COLS: {ColumnMappings.Count}]" : string.Empty;
+        return $"{SqlServerTableName} -> {OracleTableName} ({(IsActive ? "활성" : "비활성")}){wherePart}{truncatePart}{mappingPart}";
     }
 }

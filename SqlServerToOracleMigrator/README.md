@@ -84,10 +84,16 @@ mappingReader.CreateSampleMappingFile(mappingFilePath);
   - 예: `IsActive = 1`, `Region = 'KR'`, `HireDate > '2023-01-01'`
   - 빈 값이면 전체 데이터 추출
 - **F열**: TruncateTarget (선택사항, Oracle 대상 테이블 사전 초기화)
-- **F열**: TruncateTarget (선택사항, Oracle 대상 테이블 사전 초기화)
   - `TRUE` 값이면 마이그레이션 전에 Oracle 테이블의 기존 데이터를 삭제(DELETE FROM)
   - 기본값: `FALSE`
   - 허용 값: `TRUE`, `YES`, `1`, `O`, `삭제`, `TRUNCATE`
+- **G열**: SQL Server 컬럼명 목록 (선택사항, 쉼표로 구분)
+  - 예: `EmployeeID,EmployeeName,HireDate`
+  - 빈 값이면 SQL Server 테이블의 모든 컬럼을 Oracle 테이블의 동일 이름 컬럼에 매핑
+- **H열**: Oracle 컬럼명 목록 (선택사항, 쉼표로 구분)
+  - 예: `EMP_ID,EMP_NAME,HIRE_DT`
+  - G열과 같은 개수의 컬럼명을 쉼표로 구분하여 입력
+  - G열과 H열이 모두 입력되면 해당 매핑이 적용됨
 
 **단계 3: 매핑 기반 마이그레이션 실행**
 
