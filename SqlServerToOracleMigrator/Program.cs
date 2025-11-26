@@ -20,6 +20,7 @@ string? GetArgValue(string name)
 
 var configArg = GetArgValue("config") ?? GetArgValue("c");
 var mappingArg = GetArgValue("mapping") ?? GetArgValue("m");
+var createSampleFlag = args.Contains("--create-sample") || args.Contains("-s");
 
 // If config not specified, ask user whether to continue with default 'appsettings.json'
 if (string.IsNullOrWhiteSpace(configArg))
@@ -81,6 +82,15 @@ var serviceProvider = services.BuildServiceProvider();
 var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 var migrationService = serviceProvider.GetRequiredService<MigrationService>();
 var mappingReader = serviceProvider.GetRequiredService<TableMappingReader>();
+
+// If --create-sample / -s flag present, create sample mapping file and exit
+if (createSampleFlag)
+{
+    var samplePath = Path.Combine(Directory.GetCurrentDirectory(), mappingArg ?? "TableMapping.xlsx");
+    mappingReader.CreateSampleMappingFile(samplePath);
+    logger.LogInformation($"샘플 파일 생성 완료: {samplePath}");
+    return;
+}
 
 try
 {

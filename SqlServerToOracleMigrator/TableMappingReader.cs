@@ -98,7 +98,7 @@ public class TableMappingReader
 
                         // G열: SQL Server 컬럼명 목록 (쉼표로 구분)
                         // H열: Oracle 컬럼명 목록 (쉼표로 구분)
-                        var columnMappings = new Dictionary<string, string>();
+                        var columnMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         var sqlServerColumns = row.Cell(7).IsEmpty() ? null : row.Cell(7).GetString().Trim();
                         var oracleColumns = row.Cell(8).IsEmpty() ? null : row.Cell(8).GetString().Trim();
 
@@ -123,6 +123,24 @@ public class TableMappingReader
                             }
                         }
 
+                        // I열: 공백값을 대체해야 할 SQL Server 컬럼 목록 (쉼표로 구분)
+                        var emptyToDashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var emptyToDashCell = row.Cell(9).IsEmpty() ? null : row.Cell(9).GetString().Trim();
+                        if (!string.IsNullOrWhiteSpace(emptyToDashCell))
+                        {
+                            var cols = emptyToDashCell.Split(',').Select(c => c.Trim()).Where(c => !string.IsNullOrWhiteSpace(c));
+                            foreach (var c in cols)
+                                emptyToDashSet.Add(c!);
+                        }
+
+                        // J열: 공백값을 대체할 문자열 (기본값: "-")
+                        var emptyValueReplacement = "-";
+                        var replacementCell = row.Cell(10).IsEmpty() ? null : row.Cell(10).GetString().Trim();
+                        if (!string.IsNullOrWhiteSpace(replacementCell))
+                        {
+                            emptyValueReplacement = replacementCell;
+                        }
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
@@ -131,7 +149,9 @@ public class TableMappingReader
                             Description = description,
                             WhereCondition = whereCondition,
                             DeleteTarget = deleteTarget,
-                            ColumnMappings = columnMappings
+                            ColumnMappings = columnMappings,
+                            EmptyToDashColumns = emptyToDashSet,
+                            EmptyValueReplacement = emptyValueReplacement
                         };
 
                         mappings.Add(mapping);
@@ -179,6 +199,8 @@ public class TableMappingReader
                 worksheet.Cell(1, 6).Value = "TruncateTarget";
                 worksheet.Cell(1, 7).Value = "SQL Server 컬럼명";
                 worksheet.Cell(1, 8).Value = "Oracle 컬럼명";
+                worksheet.Cell(1, 9).Value = "EmptyToDashColumns (SQL 컬럼명, 쉼표 구분)";
+                worksheet.Cell(1, 10).Value = "EmptyReplacement (예: - or 'N/A')";
 
                 // 헤더 스타일
                 var headerRow = worksheet.Row(1);
@@ -195,6 +217,8 @@ public class TableMappingReader
                 worksheet.Cell(2, 6).Value = "TRUE";
                 worksheet.Cell(2, 7).Value = "EmployeeID,EmployeeName";
                 worksheet.Cell(2, 8).Value = "EMP_ID,EMP_NAME";
+                worksheet.Cell(2, 9).Value = "EmployeeName";
+                worksheet.Cell(2, 10).Value = "-";
 
                 worksheet.Cell(3, 1).Value = "dbo.Departments";
                 worksheet.Cell(3, 2).Value = "DEPARTMENTS";
@@ -204,6 +228,8 @@ public class TableMappingReader
                 worksheet.Cell(3, 6).Value = "FALSE";
                 worksheet.Cell(3, 7).Value = "";
                 worksheet.Cell(3, 8).Value = "";
+                worksheet.Cell(3, 9).Value = "";
+                worksheet.Cell(3, 10).Value = "";
 
                 worksheet.Cell(4, 1).Value = "dbo.Projects";
                 worksheet.Cell(4, 2).Value = "PROJECTS";
@@ -213,6 +239,8 @@ public class TableMappingReader
                 worksheet.Cell(4, 6).Value = "FALSE";
                 worksheet.Cell(4, 7).Value = "";
                 worksheet.Cell(4, 8).Value = "";
+                worksheet.Cell(4, 9).Value = "";
+                worksheet.Cell(4, 10).Value = "";
 
                 // 컬럼 너비 조정
                 worksheet.Column(1).Width = 25;
@@ -223,6 +251,8 @@ public class TableMappingReader
                 worksheet.Column(6).Width = 16;
                 worksheet.Column(7).Width = 35;
                 worksheet.Column(8).Width = 35;
+                worksheet.Column(9).Width = 35;
+                worksheet.Column(10).Width = 20;
 
                 workbook.SaveAs(filePath);
                 _logger.LogInformation($"샘플 매핑 파일이 생성되었습니다: {filePath}");

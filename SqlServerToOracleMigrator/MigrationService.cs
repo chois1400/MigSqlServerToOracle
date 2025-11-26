@@ -37,7 +37,7 @@ public class MigrationService
     /// If a whereCondition is provided, it will be used in the SELECT statement to filter rows.
     /// If columnMappings is provided, column names will be mapped during INSERT.
     /// </summary>
-    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null)
+    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null)
     {
         try
         {
@@ -70,7 +70,7 @@ public class MigrationService
 
                 try
                 {
-                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition, columnMappings);
+                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition, columnMappings, emptyToDashColumns, emptyValueReplacement);
                     migratedRows += currentBatchSize;
                     _logger.LogInformation($"Batch {batchNumber} completed. Total migrated: {migratedRows}/{totalRows}");
                 }
@@ -113,7 +113,7 @@ public class MigrationService
     /// <summary>
     /// Migrates a batch of data from SQL Server to Oracle.
     /// </summary>
-    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null, Dictionary<string, string>? columnMappings = null)
+    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null)
     {
         using (var sqlConnection = new SqlConnection(_sqlServerConnectionString))
         {
@@ -139,7 +139,7 @@ public class MigrationService
                         return;
 
                     // Insert into Oracle
-                    await InsertIntoOracleAsync(targetTable, dataTable, columnMappings);
+                    await InsertIntoOracleAsync(targetTable, dataTable, columnMappings, emptyToDashColumns, emptyValueReplacement);
                 }
             }
         }
@@ -150,7 +150,7 @@ public class MigrationService
     /// Maps SQL Server data types to Oracle equivalents.
     /// Supports column mapping if provided (SQL Server column name -> Oracle column name).
     /// </summary>
-    private async Task InsertIntoOracleAsync(string tableName, DataTable dataTable, Dictionary<string, string>? columnMappings = null)
+    private async Task InsertIntoOracleAsync(string tableName, DataTable dataTable, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null)
     {
         using (var oracleConnection = new OracleConnection(_oracleConnectionString))
         {
@@ -204,6 +204,16 @@ public class MigrationService
                                 var sourceColName = validColumns[i].ColumnName;
                                 var colIdx = dataTable.Columns.IndexOf(sourceColName);
                                 var value = row[colIdx] == DBNull.Value ? null : row[colIdx];
+
+                                // If this source column is configured to convert empty/whitespace to a replacement, apply it
+                                if (emptyToDashColumns != null && emptyToDashColumns.Count > 0 && emptyToDashColumns.Contains(sourceColName))
+                                {
+                                    if (value is string s && string.IsNullOrWhiteSpace(s))
+                                    {
+                                        value = string.IsNullOrEmpty(emptyValueReplacement) ? "-" : emptyValueReplacement;
+                                    }
+                                }
+
                                 command.Parameters.Add($":p{i}", value ?? DBNull.Value);
                             }
 
@@ -343,7 +353,7 @@ public class MigrationService
                         }
                     }
 
-                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings);
+                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement);
                     successCount++;
                     _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
                 }
@@ -409,7 +419,7 @@ public class MigrationService
                 }
 
                 // 테이블 마이그레이션 실행
-                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings);
+                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement);
                 successCount++;
                 _logger.LogInformation($"  ✓ 완료");
             }

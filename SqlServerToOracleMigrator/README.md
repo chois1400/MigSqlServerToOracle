@@ -94,6 +94,15 @@ mappingReader.CreateSampleMappingFile(mappingFilePath);
   - 예: `EMP_ID,EMP_NAME,HIRE_DT`
   - G열과 같은 개수의 컬럼명을 쉼표로 구분하여 입력
   - G열과 H열이 모두 입력되면 해당 매핑이 적용됨
+- **I열**: EmptyToDashColumns - 공백값을 '-'로 대체할 SQL Server 컬럼명 목록 (선택사항, 쉼표로 구분)
+  - 예: `EmployeeName,Address`
+  - SQL Server의 해당 컬럼 값이 공백(또는 공백만 포함)인 경우 Oracle에 `-`로 저장됨
+  - NOT NULL 컬럼인데 SQL Server에는 공백이, Oracle에는 공백이 NULL로 치환되는 문제를 해결하기 위함
+  - 빈 값이면 이 변환을 적용하지 않음
+- **J열**: EmptyValueReplacement (선택사항, 기본값: `-`)
+  - I열에서 지정한 컬럼들의 공백값을 대체할 값을 지정합니다
+  - 예: `-`, `N/A`, `UNKNOWN` 등
+  - 빈 값이면 기본값 `-`을 사용
 
 **단계 3: 매핑 기반 마이그레이션 실행**
 
@@ -172,6 +181,9 @@ dotnet run --configuration Debug
 - **Description**: 설명
 - **WhereCondition**: WHERE 절 (예: "IsActive = 1") - SQL Server에서 선택적으로 특정 행만 추출
 - **DeleteTarget**: Oracle 테이블 초기화 여부 - TRUE이면 마이그레이션 전에 대상 테이블의 데이터를 삭제(DELETE FROM)
+- **ColumnMappings**: SQL Server 컬럼명 → Oracle 컬럼명 매핑 (Dictionary)
+- **EmptyToDashColumns**: 공백값을 대체값으로 변환할 SQL Server 컬럼명 목록 (HashSet)
+- **EmptyValueReplacement**: 공백값을 대체할 문자열 (기본값: `-`)
 
 ## 배치 처리 방식
 

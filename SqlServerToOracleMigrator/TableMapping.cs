@@ -43,6 +43,23 @@ public class TableMapping
     /// </summary>
     public Dictionary<string, string> ColumnMappings { get; set; } = new();
 
+    /// <summary>
+    /// SQL Server의 특정 컬럼에서 빈 문자열(또는 공백)을 '-'로 대체해야 하는 컬럼 목록 (소문자/대문자 무시).
+    /// Excel의 I열에 쉼표로 구분하여 지정합니다.
+    /// </summary>
+    public HashSet<string> EmptyToDashColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// EmptyToDashColumns에서 지정한 컬럼들의 공백값을 대체할 문자열 값.
+    /// Excel의 J열에서 읽으며, 기본값은 "-"입니다.
+    /// </summary>
+    public string EmptyValueReplacement { get; set; } = "-";
+    /// <summary>
+    /// Empty replacement value when EmptyToDashColumns indicates a column should be replaced.
+    /// 기본값은 "-"입니다. Excel의 J열에 지정합니다.
+    /// </summary>
+    public string EmptyReplacement { get; set; } = "-";
+
     public override string ToString()
     {
         var wherePart = string.IsNullOrWhiteSpace(WhereCondition) ? string.Empty : $" WHERE: {WhereCondition}";
