@@ -37,7 +37,7 @@ public class MigrationService
     /// If a whereCondition is provided, it will be used in the SELECT statement to filter rows.
     /// If columnMappings is provided, column names will be mapped during INSERT.
     /// </summary>
-    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null)
+    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null, List<string>? additionalColumns = null, List<string>? additionalColumnsValues = null)
     {
         try
         {
@@ -45,6 +45,10 @@ public class MigrationService
             if (columnMappings?.Count > 0)
             {
                 _logger.LogInformation($"  Column mappings: {columnMappings.Count} columns mapped");
+            }
+            if (additionalColumns?.Count > 0)
+            {
+                _logger.LogInformation($"  Additional columns: {additionalColumns.Count} columns");
             }
             // Get row count
             long totalRows = await GetRowCountAsync(sourceTable, whereCondition);
@@ -70,7 +74,7 @@ public class MigrationService
 
                 try
                 {
-                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition, columnMappings, emptyToDashColumns, emptyValueReplacement);
+                    await MigrateBatchAsync(sourceTable, targetTable, offset, currentBatchSize, whereCondition, columnMappings, emptyToDashColumns, emptyValueReplacement, additionalColumns, additionalColumnsValues);
                     migratedRows += currentBatchSize;
                     _logger.LogInformation($"Batch {batchNumber} completed. Total migrated: {migratedRows}/{totalRows}");
                 }
@@ -113,7 +117,7 @@ public class MigrationService
     /// <summary>
     /// Migrates a batch of data from SQL Server to Oracle.
     /// </summary>
-    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null)
+    private async Task MigrateBatchAsync(string sourceTable, string targetTable, int offset, int batchSize, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null, List<string>? additionalColumns = null, List<string>? additionalColumnsValues = null)
     {
         using (var sqlConnection = new SqlConnection(_sqlServerConnectionString))
         {
@@ -139,7 +143,7 @@ public class MigrationService
                         return;
 
                     // Insert into Oracle
-                    await InsertIntoOracleAsync(targetTable, dataTable, columnMappings, emptyToDashColumns, emptyValueReplacement);
+                    await InsertIntoOracleAsync(targetTable, dataTable, columnMappings, emptyToDashColumns, emptyValueReplacement, additionalColumns, additionalColumnsValues);
                 }
             }
         }
@@ -150,7 +154,7 @@ public class MigrationService
     /// Maps SQL Server data types to Oracle equivalents.
     /// Supports column mapping if provided (SQL Server column name -> Oracle column name).
     /// </summary>
-    private async Task InsertIntoOracleAsync(string tableName, DataTable dataTable, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null)
+    private async Task InsertIntoOracleAsync(string tableName, DataTable dataTable, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null, List<string>? additionalColumns = null, List<string>? additionalColumnsValues = null)
     {
         using (var oracleConnection = new OracleConnection(_oracleConnectionString))
         {
@@ -173,8 +177,22 @@ public class MigrationService
                             continue;
                         }
 
+                        // G/H열 매핑이 지정된 경우: columnMappings의 키(G열)에 해당하는 컬럼만 선택
+                        List<DataColumn> columnsToInsert = validColumns;
+                        if (columnMappings != null && columnMappings.Count > 0)
+                        {
+                            var mappedColumnNames = new HashSet<string>(columnMappings.Keys, StringComparer.OrdinalIgnoreCase);
+                            columnsToInsert = validColumns.Where(c => mappedColumnNames.Contains(c.ColumnName)).ToList();
+                            
+                            if (columnsToInsert.Count == 0)
+                            {
+                                _logger.LogWarning($"[{tableName}] G열 매핑에 해당하는 컬럼을 찾을 수 없습니다. 건너뜁니다.");
+                                continue;
+                            }
+                        }
+
                         // 컬럼 매핑 적용: SQL Server 컬럼명 -> Oracle 컬럼명
-                        var mappedColumns = validColumns.Select(c =>
+                        var mappedColumns = columnsToInsert.Select(c =>
                         {
                             var oracleColName = columnMappings?.ContainsKey(c.ColumnName) == true 
                                 ? columnMappings[c.ColumnName] 
@@ -182,8 +200,32 @@ public class MigrationService
                             return new { Source = c.ColumnName, Target = oracleColName };
                         }).ToList();
 
-                        var columnNames = string.Join(", ", mappedColumns.Select(c => $"\"{c.Target}\""));
-                        var parameterNames = string.Join(", ", mappedColumns.Select((c, i) => $":p{i}"));
+                        // 추가 컬럼(K열) 준비
+                        var allTargetColumns = new List<string>(mappedColumns.Select(c => $"\"{c.Target}\""));
+                        var valueExpressions = new List<string>(mappedColumns.Select((c, i) => $":p{i}"));
+
+                        // 추가 컬럼(L열) 값 또는 식 처리
+                        if (additionalColumns != null && additionalColumns.Count > 0)
+                        {
+                            for (int ai = 0; ai < additionalColumns.Count; ai++)
+                            {
+                                allTargetColumns.Add($"\"{additionalColumns[ai]}\"");
+                                
+                                if (ai < (additionalColumnsValues?.Count ?? 0))
+                                {
+                                    var rawExpr = additionalColumnsValues![ai];
+                                    var builtExpr = BuildAdditionalExpressionForInsert(rawExpr, mappedColumns.Cast<object>().ToList(), validColumns, row);
+                                    valueExpressions.Add(builtExpr);
+                                }
+                                else
+                                {
+                                    valueExpressions.Add("NULL");
+                                }
+                            }
+                        }
+
+                        var columnNames = string.Join(", ", allTargetColumns);
+                        var parameterNames = string.Join(", ", valueExpressions);
 
                         if (string.IsNullOrWhiteSpace(columnNames) || string.IsNullOrWhiteSpace(parameterNames))
                         {
@@ -198,10 +240,10 @@ public class MigrationService
                             command.Transaction = transaction;
                             command.CommandTimeout = _commandTimeout;
 
-                            // Add parameters with type mapping (valid columns만)
-                            for (int i = 0; i < validColumns.Count; i++)
+                            // Add parameters with type mapping (columnsToInsert만 사용)
+                            for (int i = 0; i < columnsToInsert.Count; i++)
                             {
-                                var sourceColName = validColumns[i].ColumnName;
+                                var sourceColName = columnsToInsert[i].ColumnName;
                                 var colIdx = dataTable.Columns.IndexOf(sourceColName);
                                 var value = row[colIdx] == DBNull.Value ? null : row[colIdx];
 
@@ -215,6 +257,21 @@ public class MigrationService
                                 }
 
                                 command.Parameters.Add($":p{i}", value ?? DBNull.Value);
+                            }
+
+                            // 로그: 실행될 INSERT 문과 파라미터 값 출력
+                            try
+                            {
+                                _logger.LogInformation($"[Executing] {insertQuery}");
+                                foreach (OracleParameter p in command.Parameters)
+                                {
+                                    var displayVal = p.Value == DBNull.Value ? "NULL" : p.Value?.ToString();
+                                    _logger.LogInformation($"  {p.ParameterName} = {displayVal}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"파라미터 로깅 중 오류 발생: {ex.Message}");
                             }
 
                             await command.ExecuteNonQueryAsync();
@@ -353,7 +410,7 @@ public class MigrationService
                         }
                     }
 
-                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement);
+                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement, mapping.AdditionalColumns, mapping.AdditionalColumnsValues);
                     successCount++;
                     _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
                 }
@@ -419,7 +476,7 @@ public class MigrationService
                 }
 
                 // 테이블 마이그레이션 실행
-                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement);
+                await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement, mapping.AdditionalColumns, mapping.AdditionalColumnsValues);
                 successCount++;
                 _logger.LogInformation($"  ✓ 완료");
             }
@@ -437,6 +494,206 @@ public class MigrationService
         _logger.LogInformation($"  성공: {successCount}개 테이블");
         _logger.LogInformation($"  실패: {failureCount}개 테이블");
         _logger.LogInformation($"========================================");
+    }
+
+    /// <summary>
+    /// DB 연결 없이 로컬에서 INSERT 구문 생성을 미리보기합니다.
+    /// 추가 컬럼(L열)의 식에서 {Col} 토큰을 :pN 파라미터로 치환하여 출력합니다.
+    /// 이 메서드는 Oracle/SQL Server에 연결하지 않으며 단순히 로그로 결과를 보여줍니다.
+    /// </summary>
+    public Task PreviewInsertsLocalAsync(List<TableMapping> mappings, int sampleRows = 3)
+    {
+        _logger.LogInformation("로컬 미리보기(데이터베이스 연결 없음)를 시작합니다.");
+
+        foreach (var mapping in mappings.Where(m => m.IsActive))
+        {
+            _logger.LogInformation($"--- 매핑: {mapping.SqlServerTableName} -> {mapping.OracleTableName} ---");
+
+            // 결정된 소스 컬럼 목록: 매핑된 컬럼들 또는 L열에서 참조되는 {Col} 토큰
+            var sourceCols = new List<string>();
+            if (mapping.ColumnMappings != null && mapping.ColumnMappings.Count > 0)
+            {
+                sourceCols.AddRange(mapping.ColumnMappings.Keys);
+            }
+
+            // L열 내에서 {ColName} 형식으로 참조되는 컬럼들을 추가
+            foreach (var raw in mapping.AdditionalColumnsValues ?? Enumerable.Empty<string>())
+            {
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(raw, "\u007B([^}]+)\u007D"))
+                {
+                    var col = m.Groups[1].Value.Trim();
+                    if (!string.IsNullOrWhiteSpace(col) && !sourceCols.Any(s => string.Equals(s, col, StringComparison.OrdinalIgnoreCase)))
+                        sourceCols.Add(col);
+                }
+            }
+
+            if (sourceCols.Count == 0)
+            {
+                // 최소한 한 개의 가상 컬럼을 생성하여 파라미터 치환을 보여줍니다.
+                sourceCols.Add("SampleCol");
+            }
+
+            // 샘플 데이터 로우 생성
+            var table = new DataTable();
+            foreach (var c in sourceCols)
+                table.Columns.Add(c, typeof(string));
+
+            for (int r = 0; r < sampleRows; r++)
+            {
+                var row = table.NewRow();
+                foreach (DataColumn col in table.Columns)
+                {
+                    // 날짜/시간 컬럼명인 경우 현재 시각을 삽입
+                    if (col.ColumnName.IndexOf("DTTM", StringComparison.OrdinalIgnoreCase) >= 0 || col.ColumnName.IndexOf("DATE", StringComparison.OrdinalIgnoreCase) >= 0 || col.ColumnName.IndexOf("TIME", StringComparison.OrdinalIgnoreCase) >= 0)
+                        row[col.ColumnName] = DateTime.Now.ToString("o");
+                    else
+                        row[col.ColumnName] = $"sample_{col.ColumnName}_{r + 1}";
+                }
+                table.Rows.Add(row);
+            }
+
+            // 매핑된 대상 컬럼명 결정
+            var mappedColumns = new List<(string Source, string Target)>();
+            foreach (DataColumn dc in table.Columns)
+            {
+                var src = dc.ColumnName;
+                var tgt = (mapping.ColumnMappings != null && mapping.ColumnMappings.TryGetValue(src, out var t)) ? t : src;
+                mappedColumns.Add((src, tgt));
+            }
+
+            // 추가 컬럼(Oracle 전용) 처리
+            var additionalCols = mapping.AdditionalColumns ?? new List<string>();
+            var additionalVals = mapping.AdditionalColumnsValues ?? new List<string>();
+
+            // INSERT 컬럼 목록
+            var allTargetCols = new List<string>(mappedColumns.Select(m => m.Target));
+            allTargetCols.AddRange(additionalCols);
+
+            // 각 샘플 로우에 대해 생성되는 INSERT를 출력
+            for (int r = 0; r < table.Rows.Count; r++)
+            {
+                var row = table.Rows[r];
+
+                // 파라미터 매핑: 소스 컬럼 순서대로 :p0, :p1, ...
+                var paramMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < mappedColumns.Count; i++)
+                {
+                    paramMap[mappedColumns[i].Source] = $":p{i}";
+                }
+
+                // 대상 값 표현식 생성: 매핑된 컬럼들은 파라미터로, 추가 컬럼들은 식 또는 리터럴
+                var valueExpressions = new List<string>();
+                for (int i = 0; i < mappedColumns.Count; i++)
+                {
+                    valueExpressions.Add(paramMap[mappedColumns[i].Source]);
+                }
+
+                // 추가 식 치환
+                for (int ai = 0; ai < additionalCols.Count; ai++)
+                {
+                    string expr = ai < additionalVals.Count ? additionalVals[ai] : "NULL";
+                    var built = BuildAdditionalExpressionLocal(expr, paramMap);
+                    valueExpressions.Add(built);
+                }
+
+                var colList = string.Join(", ", allTargetCols.Select(c => $"\"{c}\""));
+                var valList = string.Join(", ", valueExpressions);
+
+                var insert = $"INSERT INTO {mapping.OracleTableName} ({colList}) VALUES ({valList});";
+                _logger.LogInformation($"[Preview row {r + 1}] {insert}");
+
+                // 파라미터 값 로그
+                for (int i = 0; i < mappedColumns.Count; i++)
+                {
+                    var src = mappedColumns[i].Source;
+                    var paramName = $":p{i}";
+                    var val = row[src];
+                    _logger.LogInformation($"  {paramName} -> {src} = {val}");
+                }
+            }
+        }
+
+        _logger.LogInformation("로컬 미리보기 종료");
+        return Task.CompletedTask;
+    }
+
+    private string BuildAdditionalExpressionLocal(string rawExpr, Dictionary<string, string> sourceParamMap)
+    {
+        if (string.IsNullOrWhiteSpace(rawExpr))
+            return "NULL";
+
+        // 간단한 안전 검사
+        var lower = rawExpr.ToLowerInvariant();
+        if (lower.Contains(";") || lower.Contains("--") || lower.Contains("/*") || lower.Contains("*/"))
+            throw new InvalidOperationException("추가 식에 허용되지 않는 문자가 포함되어 있습니다.");
+
+        // {Col} 토큰을 파라미터로 치환
+        var result = rawExpr;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(rawExpr, "\u007B([^}]+)\u007D"))
+        {
+            var col = m.Groups[1].Value.Trim();
+            if (sourceParamMap.TryGetValue(col, out var pname))
+            {
+                result = result.Replace(m.Value, pname);
+            }
+            else
+            {
+                // 대소문자 차이 허용
+                var found = sourceParamMap.Keys.FirstOrDefault(k => string.Equals(k, col, StringComparison.OrdinalIgnoreCase));
+                if (found != null)
+                {
+                    result = result.Replace(m.Value, sourceParamMap[found]);
+                }
+                else
+                {
+                    // 없는 컬럼 참조는 NULL로 치환
+                    result = result.Replace(m.Value, "NULL");
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// INSERT 실행 시 추가 컬럼(L열) 식을 평가합니다.
+    /// {Col} 토큰을 :pN 파라미터로 또는 실제 값으로 치환합니다.
+    /// </summary>
+    private string BuildAdditionalExpressionForInsert(string rawExpr, List<object> mappedColumns, List<DataColumn> validColumns, DataRow row)
+    {
+        if (string.IsNullOrWhiteSpace(rawExpr))
+            return "NULL";
+
+        // 간단한 안전 검사
+        var lower = rawExpr.ToLowerInvariant();
+        if (lower.Contains(";") || lower.Contains("--") || lower.Contains("/*") || lower.Contains("*/"))
+            throw new InvalidOperationException("추가 식에 허용되지 않는 문자가 포함되어 있습니다.");
+
+        // {Col} 토큰 맵 생성: {Col} → :pN 파라미터
+        var paramMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < mappedColumns.Count; i++)
+        {
+            dynamic mc = mappedColumns[i];
+            paramMap[mc.Source] = $":p{i}";
+        }
+
+        // {Col} 토큰을 파라미터로 치환
+        var result = rawExpr;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(rawExpr, "\u007B([^}]+)\u007D"))
+        {
+            var col = m.Groups[1].Value.Trim();
+            if (paramMap.TryGetValue(col, out var pname))
+            {
+                result = result.Replace(m.Value, pname);
+            }
+            else
+            {
+                // 없는 컬럼 참조는 NULL로 치환
+                result = result.Replace(m.Value, "NULL");
+            }
+        }
+
+        return result;
     }
 }
 

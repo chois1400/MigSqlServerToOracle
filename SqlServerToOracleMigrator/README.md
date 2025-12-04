@@ -103,6 +103,24 @@ mappingReader.CreateSampleMappingFile(mappingFilePath);
   - I열에서 지정한 컬럼들의 공백값을 대체할 값을 지정합니다
   - 예: `-`, `N/A`, `UNKNOWN` 등
   - 빈 값이면 기본값 `-`을 사용
+- **K열**: AdditionalColumns - Oracle 테이블에만 존재하는 추가 컬럼명 (선택사항, 쉼표로 구분)
+  - 예: `CreatedDate,UpdatedDate,IsDeleted`
+  - SQL Server에는 없지만 Oracle 테이블에는 있는 컬럼들을 지정
+  - 공 값이면 추가 컬럼이 없는 것으로 처리
+- **L열**: AdditionalColumnsValues (선택사항, 쉼마로 구분)
+  - K열의 각 추가 컬럼에 대한 값 또는 함수식을 지정합니다
+  - K열과 L열의 개수가 일치해야 합니다
+  - **지원하는 값**:
+    - **고정값**: `'2024-01-01'`, `'Y'`, `'0'` (따옴표로 감싼 문자열)
+    - **Oracle 함수**: `SYSDATE`, `SYSTIMESTAMP`, `CURRENT_TIMESTAMP`, `CURRENT_DATE`
+    - **동적값**: `{ColumnName}` (해당 SQL Server 컬럼값으로 치환)
+      - 예: `{EmployeeID}` - SQL Server의 EmployeeID 컬럼값을 사용
+    - **조합 함수 / Oracle 함수 사용 예 (권장 표기)**:
+      - `SUBSTR({ColumnName}, 1, 5)`
+      - `TO_CHAR({INSDTTM}, 'YYYYMMDDHH24MISSFF9')`  ← Oracle에서 평가되도록 `{}`로 컬럼을 감싸서 사용
+      - 주의: L열의 식은 그대로 Oracle INSERT VALUES 절에 삽입되어 실행되므로, 소스 컬럼명을 `{ColumnName}` 형태로 표기하거나 SELECT 결과에 해당 컬럼이 포함되어 있어야 합니다.
+      - 예제 설명: K열에 추가 컬럼 `FormattedDt`를 넣고, L열에 `TO_CHAR({INSDTTM}, 'YYYYMMDDHH24MISSFF9')`를 입력하면 Oracle에서 `TO_CHAR(:pX, '...')` 형태로 치환되어 함수 결과가 삽입됩니다.
+  - 예: `SYSDATE,'ACTIVE',{EmployeeID}` → 3개 추가 컬럼에 현재시간, 문자값, 직원ID를 각각 입력
 
 **단계 3: 매핑 기반 마이그레이션 실행**
 
@@ -184,6 +202,8 @@ dotnet run --configuration Debug
 - **ColumnMappings**: SQL Server 컬럼명 → Oracle 컬럼명 매핑 (Dictionary)
 - **EmptyToDashColumns**: 공백값을 대체값으로 변환할 SQL Server 컬럼명 목록 (HashSet)
 - **EmptyValueReplacement**: 공백값을 대체할 문자열 (기본값: `-`)
+- **AdditionalColumns**: Oracle 테이블에만 존재하는 추가 컬럼명 목록 (List<string>)
+- **AdditionalColumnsValues**: 추가 컬럼에 입력할 값 또는 함수식 목록 (List<string>)
 
 ## 배치 처리 방식
 
@@ -203,6 +223,12 @@ dotnet run --configuration Debug
 | D | 설명 | 테이블 마이그레이션에 대한 설명 (로그에만 표시) | 선택 | "직원 정보 테이블" |
 | E | WhereCondition | SQL Server에서 데이터를 추출할 때 적용할 WHERE 조건 | 선택 (전체 추출) | `IsActive = 1`, `HireDate > '2023-01-01'` |
 | F | TruncateTarget | TRUE이면 마이그레이션 전에 Oracle 테이블의 기존 데이터 삭제 | FALSE | TRUE, FALSE |
+| G | SQL Server 컬럼명 | SQL Server의 컬럼명들 (쉼표로 구분) | 선택 (전체 컬럼) | `EmployeeID,EmployeeName,Department` |
+| H | Oracle 컬럼명 | Oracle의 컬럼명들 (쉼표로 구분, G열과 개수 일치) | 선택 | `EMP_ID,EMP_NAME,DEPT` |
+| I | EmptyToDashColumns | 공백값을 대체값으로 변환할 컬럼명 (쉼표로 구분) | 선택 (변환 안 함) | `EmployeeName,Department` |
+| J | EmptyValueReplacement | 공백값을 대체할 문자열 | `-` | `-`, `N/A`, `UNKNOWN` |
+| K | AdditionalColumns | Oracle 전용 추가 컬럼명 (쉼표로 구분) | 선택 (추가 컬럼 없음) | `CreatedDate,UpdatedDate,IsDeleted` |
+| L | AdditionalColumnsValues | 추가 컬럼의 값 또는 함수 (쉼표로 구분, K열과 개수 일치) | 선택 | `SYSDATE,'Y',{EmployeeID}` |
 
 ### 사용 시나리오
 

@@ -20,7 +20,12 @@ string? GetArgValue(string name)
 
 var configArg = GetArgValue("config") ?? GetArgValue("c");
 var mappingArg = GetArgValue("mapping") ?? GetArgValue("m");
+var dryRunLocal = args.Contains("--dry-run-local");
 var createSampleFlag = args.Contains("--create-sample") || args.Contains("-s");
+var sampleRowCountStr = GetArgValue("sample") ?? GetArgValue("sample");
+int sampleRowCount = 3; // default
+if (!string.IsNullOrWhiteSpace(sampleRowCountStr) && int.TryParse(sampleRowCountStr, out var count) && count > 0)
+    sampleRowCount = count;
 
 // If config not specified, ask user whether to continue with default 'appsettings.json'
 if (string.IsNullOrWhiteSpace(configArg))
@@ -96,9 +101,53 @@ try
 {
     logger.LogInformation("SQL Server to Oracle Migration Tool Started");
     logger.LogInformation("========================================");
+        // If requested, run DB-less local preview and exit before attempting DB connections
+        if (dryRunLocal)
+        {
+            logger.LogInformation("--dry-run-local detected: DB-less INSERT 미리보기를 실행합니다.");
 
-    // Example 1: Get all source tables
-    logger.LogInformation("Retrieving source tables from SQL Server...");
+            // Determine mapping file to use
+            string? mappingFileToUse = null;
+            if (!string.IsNullOrWhiteSpace(mappingArg))
+            {
+                mappingFileToUse = Path.IsPathRooted(mappingArg) ? mappingArg : Path.Combine(Directory.GetCurrentDirectory(), mappingArg);
+                if (!File.Exists(mappingFileToUse))
+                {
+                    logger.LogError($"지정된 매핑 파일을 찾을 수 없습니다: {mappingFileToUse}");
+                    mappingFileToUse = null;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(mappingFileToUse))
+            {
+                var defaultPath = Path.Combine(Directory.GetCurrentDirectory(), "TableMapping.xlsx");
+                if (File.Exists(defaultPath))
+                    mappingFileToUse = defaultPath;
+                else
+                {
+                    logger.LogError("매핑 파일이 지정되지 않았고 기본 'TableMapping.xlsx'을 찾을 수 없습니다. 로컬 미리보기를 실행하려면 매핑 파일을 준비하세요.");
+                    return;
+                }
+            }
+
+            logger.LogInformation($"로컬 미리보기에 사용할 매핑 파일: {mappingFileToUse}");
+            logger.LogInformation($"샘플 행 수: {sampleRowCount}");
+            var mappings = mappingReader.ReadMappingsFromExcel(mappingFileToUse);
+            if (mappings.Any())
+            {
+                await migrationService.PreviewInsertsLocalAsync(mappings, sampleRowCount);
+            }
+            else
+            {
+                logger.LogWarning("매핑 정보가 비어있어 미리보기를 실행할 수 없습니다.");
+            }
+
+            logger.LogInformation("로컬 미리보기를 종료합니다.");
+            return;
+        }
+
+        // Example 1: Get all source tables
+        logger.LogInformation("Retrieving source tables from SQL Server...");
     try
     {
         var tables = await migrationService.GetSourceTablesAsync();
@@ -173,7 +222,15 @@ try
             logger.LogInformation($"읽은 매핑 정보: {mappings.Count}개");
             if (mappings.Any())
             {
-                await migrationService.MigrateWithMappingAsync(mappings);
+                if (dryRunLocal)
+                {
+                    logger.LogInformation("--dry-run-local 플래그가 감지되었습니다. DB 연결 없이 INSERT 미리보기를 실행합니다.");
+                    await migrationService.PreviewInsertsLocalAsync(mappings);
+                }
+                else
+                {
+                    await migrationService.MigrateWithMappingAsync(mappings);
+                }
             }
             else
             {

@@ -141,6 +141,35 @@ public class TableMappingReader
                             emptyValueReplacement = replacementCell;
                         }
 
+                        // K열: Oracle 테이블에만 존재하는 추가 컬럼명 (쉼표로 구분)
+                        var additionalColumns = new List<string>();
+                        var additionalColsCell = row.Cell(11).IsEmpty() ? null : row.Cell(11).GetString().Trim();
+                        if (!string.IsNullOrWhiteSpace(additionalColsCell))
+                        {
+                            var cols = additionalColsCell.Split(',').Select(c => c.Trim()).Where(c => !string.IsNullOrWhiteSpace(c));
+                            additionalColumns.AddRange(cols);
+                        }
+
+                        // L열: 추가 컬럼의 값 또는 함수식 (쉼표로 구분, K열의 순서와 일치해야 함)
+                        var additionalColumnsValues = new List<string>();
+                        var additionalValuesCell = row.Cell(12).IsEmpty() ? null : row.Cell(12).GetString().Trim();
+                        if (!string.IsNullOrWhiteSpace(additionalValuesCell))
+                        {
+                            // 함수식을 정확히 파싱: 괄호 내의 쉼표는 무시하고, 괄호 밖의 쉼표로만 split
+                            // 예: "TO_CHAR({INSDTTM}, 'YYYYMMDDHHMMSSFF9'),SYSDATE,'ACTIVE'"
+                            // → ["TO_CHAR({INSDTTM}, 'YYYYMMDDHHMMSSFF9')", "SYSDATE", "'ACTIVE'"]
+                            var values = SplitPreservingParentheses(additionalValuesCell);
+                            additionalColumnsValues.AddRange(values);
+                            
+                            _logger.LogInformation($"행 {rowNumber}: L열 파싱 결과 = [{string.Join(", ", values.Select(v => $"\"{v}\""))}]");
+                        }
+
+                        // K와 L 열의 개수가 일치하는지 확인
+                        if (additionalColumns.Count > 0 && additionalColumnsValues.Count > 0 && additionalColumns.Count != additionalColumnsValues.Count)
+                        {
+                            _logger.LogWarning($"행 {rowNumber}: 추가 컬럼 개수({additionalColumns.Count})와 값 개수({additionalColumnsValues.Count})가 다릅니다. 개수가 적은 만큼만 적용됩니다.");
+                        }
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
@@ -151,7 +180,9 @@ public class TableMappingReader
                             DeleteTarget = deleteTarget,
                             ColumnMappings = columnMappings,
                             EmptyToDashColumns = emptyToDashSet,
-                            EmptyValueReplacement = emptyValueReplacement
+                            EmptyValueReplacement = emptyValueReplacement,
+                            AdditionalColumns = additionalColumns,
+                            AdditionalColumnsValues = additionalColumnsValues
                         };
 
                         mappings.Add(mapping);
@@ -201,6 +232,8 @@ public class TableMappingReader
                 worksheet.Cell(1, 8).Value = "Oracle 컬럼명";
                 worksheet.Cell(1, 9).Value = "EmptyToDashColumns (SQL 컬럼명, 쉼표 구분)";
                 worksheet.Cell(1, 10).Value = "EmptyReplacement (예: - or 'N/A')";
+                worksheet.Cell(1, 11).Value = "AdditionalColumns (Oracle 전용 컬럼명, 쉼표 구분)";
+                worksheet.Cell(1, 12).Value = "AdditionalColumnsValues (값 또는 함수, 쉼표 구분)";
 
                 // 헤더 스타일
                 var headerRow = worksheet.Row(1);
@@ -212,13 +245,15 @@ public class TableMappingReader
                 worksheet.Cell(2, 1).Value = "dbo.Employees";
                 worksheet.Cell(2, 2).Value = "EMPLOYEES";
                 worksheet.Cell(2, 3).Value = "TRUE";
-                worksheet.Cell(2, 4).Value = "직원 정보 테이블";
+                worksheet.Cell(2, 4).Value = "직원 정보 테이블 (TO_CHAR 함수 예제)";
                 worksheet.Cell(2, 5).Value = "IsActive = 1";
                 worksheet.Cell(2, 6).Value = "TRUE";
-                worksheet.Cell(2, 7).Value = "EmployeeID,EmployeeName";
-                worksheet.Cell(2, 8).Value = "EMP_ID,EMP_NAME";
+                worksheet.Cell(2, 7).Value = "EmployeeID,EmployeeName,INSDTTM";
+                worksheet.Cell(2, 8).Value = "EMP_ID,EMP_NAME,INS_DT";
                 worksheet.Cell(2, 9).Value = "EmployeeName";
                 worksheet.Cell(2, 10).Value = "-";
+                worksheet.Cell(2, 11).Value = "FormattedInsDate,CreatedDate,IsDeleted,Department";
+                worksheet.Cell(2, 12).Value = "TO_CHAR({INSDTTM}, 'YYYYMMDDHHMMSSFF9'),SYSDATE,'N','HR'";
 
                 worksheet.Cell(3, 1).Value = "dbo.Departments";
                 worksheet.Cell(3, 2).Value = "DEPARTMENTS";
@@ -230,6 +265,8 @@ public class TableMappingReader
                 worksheet.Cell(3, 8).Value = "";
                 worksheet.Cell(3, 9).Value = "";
                 worksheet.Cell(3, 10).Value = "";
+                worksheet.Cell(3, 11).Value = "UpdatedDate";
+                worksheet.Cell(3, 12).Value = "SYSTIMESTAMP";
 
                 worksheet.Cell(4, 1).Value = "dbo.Projects";
                 worksheet.Cell(4, 2).Value = "PROJECTS";
@@ -241,6 +278,8 @@ public class TableMappingReader
                 worksheet.Cell(4, 8).Value = "";
                 worksheet.Cell(4, 9).Value = "";
                 worksheet.Cell(4, 10).Value = "";
+                worksheet.Cell(4, 11).Value = "MigrationDate,MigratedFrom";
+                worksheet.Cell(4, 12).Value = "CURRENT_DATE,'SQL_Server'";
 
                 // 컬럼 너비 조정
                 worksheet.Column(1).Width = 25;
@@ -253,6 +292,8 @@ public class TableMappingReader
                 worksheet.Column(8).Width = 35;
                 worksheet.Column(9).Width = 35;
                 worksheet.Column(10).Width = 20;
+                worksheet.Column(11).Width = 40;
+                worksheet.Column(12).Width = 40;
 
                 workbook.SaveAs(filePath);
                 _logger.LogInformation($"샘플 매핑 파일이 생성되었습니다: {filePath}");
@@ -263,5 +304,56 @@ public class TableMappingReader
             _logger.LogError($"샘플 매핑 파일 생성 중 오류 발생: {ex.Message}");
             throw;
         }
+    }
+
+    /// <summary>
+    /// 괄호를 고려하여 쉼표로 분리합니다.
+    /// 예: "TO_CHAR({Col}, 'fmt'),SYSDATE,'Y'" → ["TO_CHAR({Col}, 'fmt')", "SYSDATE", "'Y'"]
+    /// </summary>
+    private List<string> SplitPreservingParentheses(string input)
+    {
+        var result = new List<string>();
+        var current = new System.Text.StringBuilder();
+        int parenDepth = 0;
+        bool inSingleQuote = false;
+        bool inDoubleQuote = false;
+
+        foreach (var ch in input)
+        {
+            // 따옴표 처리
+            if (ch == '\'' && !inDoubleQuote)
+                inSingleQuote = !inSingleQuote;
+            else if (ch == '"' && !inSingleQuote)
+                inDoubleQuote = !inDoubleQuote;
+
+            // 괄호 깊이 추적 (따옴표 밖에서만)
+            if (!inSingleQuote && !inDoubleQuote)
+            {
+                if (ch == '(')
+                    parenDepth++;
+                else if (ch == ')')
+                    parenDepth--;
+            }
+
+            // 쉼표 처리 (괄호 밖에서만 분리)
+            if (ch == ',' && parenDepth == 0 && !inSingleQuote && !inDoubleQuote)
+            {
+                var value = current.ToString().Trim();
+                if (!string.IsNullOrWhiteSpace(value))
+                    result.Add(value);
+                current.Clear();
+            }
+            else
+            {
+                current.Append(ch);
+            }
+        }
+
+        // 마지막 항목 추가
+        var lastValue = current.ToString().Trim();
+        if (!string.IsNullOrWhiteSpace(lastValue))
+            result.Add(lastValue);
+
+        return result;
     }
 }

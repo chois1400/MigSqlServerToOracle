@@ -54,11 +54,24 @@ public class TableMapping
     /// Excel의 J열에서 읽으며, 기본값은 "-"입니다.
     /// </summary>
     public string EmptyValueReplacement { get; set; } = "-";
+
     /// <summary>
-    /// Empty replacement value when EmptyToDashColumns indicates a column should be replaced.
-    /// 기본값은 "-"입니다. Excel의 J열에 지정합니다.
+    /// Oracle 테이블에만 존재하는 추가 컬럼명 목록 (쉼표로 구분).
+    /// 예: "CreatedDate,UpdatedDate,IsDeleted"
+    /// Excel의 K열에 지정합니다.
     /// </summary>
-    public string EmptyReplacement { get; set; } = "-";
+    public List<string> AdditionalColumns { get; set; } = new();
+
+    /// <summary>
+    /// K열의 각 추가 컬럼에 대한 값 또는 함수식 (쉼표로 구분).
+    /// - 고정값: '2024-01-01', 'Y', '0'
+    /// - 함수: SYSDATE, SYSTIMESTAMP, CURRENT_TIMESTAMP, CURRENT_DATE
+    /// - 동적값: {ColumnName} (해당 컬럼값으로 치환)
+    /// - 조합: SUBSTR({ColumnName}, 1, 5)
+    /// 예: "SYSDATE,SYSTIMESTAMP,{IsActive}"
+    /// Excel의 L열에 지정합니다.
+    /// </summary>
+    public List<string> AdditionalColumnsValues { get; set; } = new();
 
     public override string ToString()
     {
