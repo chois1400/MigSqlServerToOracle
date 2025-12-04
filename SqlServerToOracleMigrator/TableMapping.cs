@@ -73,6 +73,31 @@ public class TableMapping
     /// </summary>
     public List<string> AdditionalColumnsValues { get; set; } = new();
 
+    /// <summary>
+    /// Excel 파일에서 읽은 행 번호 (2부터 시작, 1은 헤더)
+    /// </summary>
+    public int ExcelRowNumber { get; set; }
+
+    /// <summary>
+    /// 마이그레이션 시작 시간
+    /// </summary>
+    public DateTime? StartTime { get; set; }
+
+    /// <summary>
+    /// 마이그레이션 완료 시간
+    /// </summary>
+    public DateTime? EndTime { get; set; }
+
+    /// <summary>
+    /// 마이그레이션 상태 (시작 전, 진행 중, 완료, 실패)
+    /// </summary>
+    public string Status { get; set; } = "대기";
+
+    /// <summary>
+    /// 이전한 레코드 개수
+    /// </summary>
+    public int RecordCount { get; set; } = 0;
+
     public override string ToString()
     {
         var wherePart = string.IsNullOrWhiteSpace(WhereCondition) ? string.Empty : $" WHERE: {WhereCondition}";

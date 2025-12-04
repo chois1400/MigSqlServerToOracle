@@ -182,7 +182,8 @@ public class TableMappingReader
                             EmptyToDashColumns = emptyToDashSet,
                             EmptyValueReplacement = emptyValueReplacement,
                             AdditionalColumns = additionalColumns,
-                            AdditionalColumnsValues = additionalColumnsValues
+                            AdditionalColumnsValues = additionalColumnsValues,
+                            ExcelRowNumber = rowNumber
                         };
 
                         mappings.Add(mapping);
@@ -355,5 +356,120 @@ public class TableMappingReader
             result.Add(lastValue);
 
         return result;
+    }
+
+    /// <summary>
+    /// Excel 파일에 마이그레이션 시간 정보를 기록합니다.
+    /// M열: 시작 시간, N열: 완료 시간, O열: 상태, P열: 소요 시간, Q열: 이전 레코드 개수
+    /// </summary>
+    public void UpdateMigrationTimes(string filePath, List<TableMapping> mappings)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                _logger.LogError($"매핑 파일을 찾을 수 없습니다: {filePath}");
+                return;
+            }
+
+            // 임시 파일에 작업한 후 원본 파일로 덮어쓰기
+            string tempPath = Path.GetTempFileName();
+            
+            try
+            {
+                using (var workbook = new XLWorkbook(filePath))
+                {
+                    var worksheet = workbook.Worksheets.First();
+                    
+                    // 헤더 설정 (M, N, O, P, Q 열)
+                    if (worksheet.Cell(1, 13).IsEmpty())
+                    {
+                        worksheet.Cell(1, 13).Value = "시작 시간";
+                        worksheet.Cell(1, 14).Value = "완료 시간";
+                        worksheet.Cell(1, 15).Value = "상태";
+                        worksheet.Cell(1, 16).Value = "소요 시간";
+                        worksheet.Cell(1, 17).Value = "이전 레코드 수";
+                        worksheet.Cell(1, 13).Style.Font.Bold = true;
+                        worksheet.Cell(1, 14).Style.Font.Bold = true;
+                        worksheet.Cell(1, 15).Style.Font.Bold = true;
+                        worksheet.Cell(1, 16).Style.Font.Bold = true;
+                        worksheet.Cell(1, 17).Style.Font.Bold = true;
+                    }
+
+                    foreach (var mapping in mappings)
+                    {
+                        if (mapping.ExcelRowNumber > 0)
+                        {
+                            int row = mapping.ExcelRowNumber;
+                            
+                            // M열: 시작 시간
+                            if (mapping.StartTime.HasValue)
+                            {
+                                worksheet.Cell(row, 13).Value = mapping.StartTime.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                            }
+                            
+                            // N열: 완료 시간
+                            if (mapping.EndTime.HasValue)
+                            {
+                                worksheet.Cell(row, 14).Value = mapping.EndTime.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                                
+                                // 소요 시간 계산
+                                if (mapping.StartTime.HasValue)
+                                {
+                                    var duration = mapping.EndTime.Value - mapping.StartTime.Value;
+                                    worksheet.Cell(row, 16).Value = $"{duration.TotalSeconds:F2}초";
+                                }
+                            }
+                            
+                            // O열: 상태
+                            worksheet.Cell(row, 15).Value = mapping.Status;
+                            
+                            // Q열: 이전 레코드 개수
+                            if (mapping.RecordCount > 0)
+                            {
+                                worksheet.Cell(row, 17).Value = mapping.RecordCount;
+                            }
+                            
+                            // 상태에 따라 색상 지정
+                            var statusCell = worksheet.Cell(row, 15);
+                            switch (mapping.Status)
+                            {
+                                case "완료":
+                                    statusCell.Style.Fill.BackgroundColor = XLColor.LightGreen;
+                                    break;
+                                case "실패":
+                                    statusCell.Style.Fill.BackgroundColor = XLColor.LightPink;
+                                    break;
+                                case "진행 중":
+                                    statusCell.Style.Fill.BackgroundColor = XLColor.LightYellow;
+                                    break;
+                            }
+                        }
+                    }
+
+                    // 임시 파일에 저장
+                    workbook.SaveAs(tempPath);
+                }
+
+                // 원본 파일 삭제 후 임시 파일 이름 변경
+                File.Delete(filePath);
+                File.Move(tempPath, filePath);
+                
+                _logger.LogInformation($"마이그레이션 시간 정보를 Excel 파일에 기록했습니다: {filePath}");
+            }
+            catch
+            {
+                // 임시 파일 정리
+                if (File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
+                throw;
+            }
+        }
+        catch
+        {
+            _logger.LogError($"Excel 파일 업데이트 중 오류 발생");
+        }
     }
 }

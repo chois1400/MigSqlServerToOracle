@@ -230,6 +230,16 @@ try
                 else
                 {
                     await migrationService.MigrateWithMappingAsync(mappings);
+                    
+                    // 마이그레이션 완료 후 Excel 파일에 시간 정보 기록
+                    try
+                    {
+                        mappingReader.UpdateMigrationTimes(mappingFileToUse, mappings);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning($"Excel 파일 업데이트 중 오류: {ex.Message}");
+                    }
                 }
             }
             else

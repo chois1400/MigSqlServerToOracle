@@ -37,7 +37,7 @@ public class MigrationService
     /// If a whereCondition is provided, it will be used in the SELECT statement to filter rows.
     /// If columnMappings is provided, column names will be mapped during INSERT.
     /// </summary>
-    public async Task MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null, List<string>? additionalColumns = null, List<string>? additionalColumnsValues = null)
+    public async Task<int> MigrateTableAsync(string sourceTable, string targetTable, string? whereCondition = null, Dictionary<string, string>? columnMappings = null, HashSet<string>? emptyToDashColumns = null, string? emptyValueReplacement = null, List<string>? additionalColumns = null, List<string>? additionalColumnsValues = null)
     {
         try
         {
@@ -57,7 +57,7 @@ public class MigrationService
             if (totalRows == 0)
             {
                 _logger.LogWarning($"Table '{sourceTable}' is empty. Skipping migration.");
-                return;
+                return 0;
             }
 
             // Migrate in batches
@@ -86,6 +86,7 @@ public class MigrationService
             }
 
             _logger.LogInformation($"Successfully migrated {migratedRows} rows from '{sourceTable}' to '{targetTable}'");
+            return (int)migratedRows;
         }
         catch (Exception ex)
         {
@@ -390,6 +391,10 @@ public class MigrationService
             {
                 try
                 {
+                    // 시작 시간 기록
+                    mapping.StartTime = DateTime.Now;
+                    mapping.Status = "진행 중";
+                    
                     _logger.LogInformation($"마이그레이션 시작: {mapping.SqlServerTableName} -> {mapping.OracleTableName}");
                     if (!string.IsNullOrEmpty(mapping.Description))
                     {
@@ -410,12 +415,22 @@ public class MigrationService
                         }
                     }
 
-                    await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement, mapping.AdditionalColumns, mapping.AdditionalColumnsValues);
+                    int recordCount = await MigrateTableAsync(mapping.SqlServerTableName, mapping.OracleTableName, mapping.WhereCondition, mapping.ColumnMappings, mapping.EmptyToDashColumns, mapping.EmptyValueReplacement, mapping.AdditionalColumns, mapping.AdditionalColumnsValues);
+                    
+                    // 완료 시간 및 레코드 개수 기록
+                    mapping.EndTime = DateTime.Now;
+                    mapping.RecordCount = recordCount;
+                    mapping.Status = "완료";
                     successCount++;
-                    _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료");
+                    
+                    var duration = mapping.EndTime.Value - mapping.StartTime.Value;
+                    _logger.LogInformation($"✓ {mapping.SqlServerTableName} 마이그레이션 완료 (소요 시간: {duration.TotalSeconds:F2}초)");
                 }
                 catch (Exception ex)
                 {
+                    // 실패 시간 기록
+                    mapping.EndTime = DateTime.Now;
+                    mapping.Status = "실패";
                     failureCount++;
                     _logger.LogError($"✗ {mapping.SqlServerTableName} 마이그레이션 실패: {ex.Message}");
                 }
