@@ -4,10 +4,16 @@
 
 ## 기능
 
-- ✅ SQL Server에서 배치 단위로 데이터 읽기
+- ✅ SQL Server에서 배치 단위로 데이터 읽기 (REPEATABLEREAD 격리 수준)
 - ✅ 데이터 타입 자동 매핑 (SQL Server → Oracle)
 - ✅ 트랜잭션 기반 데이터 삽입 (배치별)
-- ✅ **Excel 매핑 파일을 사용한 테이블 매핑** (새 기능)
+- ✅ **Excel 매핑 파일을 사용한 테이블 매핑**
+- ✅ **Primary Key 기반 자동 정렬** (배치 중복 방지)
+- ✅ **중복 키 자동 Skip** (ORA-00001 처리)
+- ✅ **중복 데이터 로그 파일 생성** (DuplicateLogs 폴더)
+- ✅ **마이그레이션 통계 Excel 기록** (성공/중복/전체 건수, 시간 정보)
+- ✅ **Oracle 함수식 지원** (L열: TO_CHAR, SYSDATE 등)
+- ✅ **배치 내 중복 검증 및 경고**
 - ✅ 포괄적인 오류 처리 및 로깅
 - ✅ 설정 기반 배치 크기 및 타임아웃 조정
 - ✅ 테이블 자동 검색 기능
@@ -204,6 +210,13 @@ dotnet run --configuration Debug
 - **EmptyValueReplacement**: 공백값을 대체할 문자열 (기본값: `-`)
 - **AdditionalColumns**: Oracle 테이블에만 존재하는 추가 컬럼명 목록 (List<string>)
 - **AdditionalColumnsValues**: 추가 컬럼에 입력할 값 또는 함수식 목록 (List<string>)
+- **OrderByColumns**: 정렬 기준 컬럼 (S열, 선택사항) - 배치 중복 방지용
+- **StartTime/EndTime**: 마이그레이션 시작/완료 시간 (M/N열, 자동 기록)
+- **Status**: 마이그레이션 상태 (O열: 완료/실패/진행 중, 자동 기록)
+- **RecordCount**: 성공한 레코드 수 (Q열, 자동 기록)
+- **SkippedCount**: 중복으로 건너뛴 레코드 수 (T열, 자동 기록)
+- **TotalProcessed**: 전체 처리 레코드 수 (U열, 자동 기록)
+- **ErrorMessage**: 오류 메시지 (R열, 실패 시 자동 기록)
 
 ## 배치 처리 방식
 
@@ -228,7 +241,16 @@ dotnet run --configuration Debug
 | I | EmptyToDashColumns | 공백값을 대체값으로 변환할 컬럼명 (쉼표로 구분) | 선택 (변환 안 함) | `EmployeeName,Department` |
 | J | EmptyValueReplacement | 공백값을 대체할 문자열 | `-` | `-`, `N/A`, `UNKNOWN` |
 | K | AdditionalColumns | Oracle 전용 추가 컬럼명 (쉼표로 구분) | 선택 (추가 컬럼 없음) | `CreatedDate,UpdatedDate,IsDeleted` |
-| L | AdditionalColumnsValues | 추가 컬럼의 값 또는 함수 (쉼표로 구분, K열과 개수 일치) | 선택 | `SYSDATE,'Y',{EmployeeID}` |
+| L | AdditionalColumnsValues | 추가 컬럼의 값 또는 함수 (쉼표로 구분, K열과 개수 일치) | 선택 | `SYSDATE,'Y',TO_CHAR({INSDTTM},'YYYYMMDD')` |
+| M | 시작 시간 | 마이그레이션 시작 시각 | 자동 기록 | 2025-12-10 10:30:00 |
+| N | 완료 시간 | 마이그레이션 완료 시각 | 자동 기록 | 2025-12-10 10:35:00 |
+| O | 상태 | 마이그레이션 상태 | 자동 기록 | 완료, 실패, 진행 중 |
+| P | 소요 시간 | 마이그레이션 소요 시간 | 자동 계산 | 300초 |
+| Q | 이전 레코드 수 | 성공한 레코드 수 | 자동 기록 | 10000 |
+| R | 오류 메시지 | 실패 시 오류 내용 | 자동 기록 | ORA-00001... |
+| S | 정렬 컬럼 | 배치 정렬 기준 (중복 방지용) | 선택 (PK 자동 조회) | `HIST_SEQNO, INSDTTM, ZONEID` |
+| T | 중복 건너뜀 | 중복으로 Skip된 레코드 수 | 자동 기록 | 50 |
+| U | 전체 처리 | SQL Server에서 읽은 전체 레코드 수 | 자동 기록 | 10050 |
 
 ### 사용 시나리오
 
@@ -349,13 +371,42 @@ dotnet run --configuration Debug
 
 - **GetSourceTablesAsync()**: SQL Server의 모든 테이블 목록 조회
 - **MigrateTableAsync(sourceTable, targetTable)**: 특정 테이블 마이그레이션 (배치 처리)
+- **MigrateWithMappingAsync(mappings)**: Excel 매핑을 사용한 다중 테이블 마이그레이션
 - **DeleteOracleTableAsync(tableName)**: Oracle 테이블 데이터 삭제
+- **GetPrimaryKeyColumnsAsync(tableName)**: SQL Server 테이블의 Primary Key 컬럼 조회
+- **InsertIntoOracleAsync(...)**: Oracle에 데이터 삽입 (중복 자동 Skip)
 
 ## 배치 처리 방식
 
 - 기본 배치 크기: 1,000행 (appsettings.json에서 조정 가능)
 - 각 배치는 별도의 트랜잭션으로 처리
+- **REPEATABLEREAD 격리 수준 사용** - 배치 간 데이터 중복 방지
+- **Primary Key 기반 자동 정렬** - 배치마다 일관된 순서 보장
+- **중복 키 자동 Skip** - ORA-00001 발생 시 해당 행만 건너뛰고 계속 진행
 - 배치 실패 시 해당 배치 트랜잭션만 롤백
+
+## 중복 데이터 처리
+
+### 중복 발생 시 동작
+1. Oracle INSERT 시 ORA-00001 (unique constraint violated) 발생
+2. 해당 행을 자동으로 Skip하고 다음 행 처리 계속
+3. 중복된 데이터를 `DuplicateLogs` 폴더에 JSON 형식으로 기록
+4. 중복 건수를 Excel T열에 자동 기록
+
+### 중복 로그 파일
+- **위치**: `프로젝트폴더/DuplicateLogs/`
+- **파일명**: `테이블명_YYYYMMDD_duplicates.log`
+- **형식**: JSON Lines (한 줄에 하나의 JSON 객체)
+- **내용**: 
+  - Timestamp: 중복 발생 시각
+  - Table: 테이블명
+  - Data: SQL Server에서 읽은 모든 컬럼 데이터
+  - Analysis: INSDTTM 정밀도 분석 (해당되는 경우)
+
+### 배치 중복 방지
+- **Excel S열**: 수동으로 정렬 기준 컬럼 지정 (예: `HIST_SEQNO, INSDTTM, ZONEID`)
+- **S열이 비어있으면**: Primary Key를 자동 조회하여 정렬
+- **PK 조회 실패 시**: 경고 후 ORDER BY 1 사용 (중복 위험 있음)
 
 ## 성능 최적화 팁
 
@@ -396,9 +447,17 @@ await migrationService.DeleteOracleTableAsync("YOUR_TABLE_NAME");
 프로그램은 다음 정보를 콘솔에 출력합니다:
 
 - 마이그레이션 시작/종료
-- 배치별 진행 상황
+- 배치별 진행 상황 (전체 건수, 성공 건수, 중복 건수)
+- Primary Key 조회 결과
+- 배치 내부 중복 감지 경고
+- 중복 데이터 상세 정보 (처음 5건)
 - 오류 및 예외 메시지
 - 총 마이그레이션 행 수
+
+### 중복 데이터 로그 파일
+- 위치: `DuplicateLogs/` 폴더
+- 파일명: `{테이블명}_{YYYYMMDD}_duplicates.log`
+- 내용: JSON 형식의 중복 행 데이터 및 분석 정보
 
 ## 문제 해결
 
@@ -413,6 +472,20 @@ await migrationService.DeleteOracleTableAsync("YOUR_TABLE_NAME");
 
 ### 데이터 타입 불일치
 - Oracle 테이블 스키마와 SQL Server 소스 테이블의 컬럼 타입을 확인하세요
+
+### 중복 데이터 오류 (ORA-00001)
+- **증상**: Oracle INSERT 시 Unique constraint violated 오류 발생
+- **해결 방법**:
+  1. `DuplicateLogs` 폴더에서 중복 로그 파일 확인
+  2. Excel S열에 적절한 정렬 컬럼 지정 (예: Primary Key 컬럼들)
+  3. SQL Server와 Oracle의 Primary Key 정의가 일치하는지 확인
+  4. INSDTTM 같은 시간 컬럼을 Oracle PK로 사용 시 정밀도 확인
+  5. 로그에서 "Primary Key 조회 실패" 경고 확인 → S열에 수동으로 정렬 컬럼 지정
+
+### 배치 처리 느림
+- `appsettings.json`의 `BatchSize`를 증가시키세요 (기본값: 1000)
+- Oracle 테이블의 인덱스를 임시 비활성화하세요
+- `REPEATABLEREAD` 격리 수준이 필요한지 검토하세요 (데이터 일관성 vs 성능)
 
 ## 라이센스
 

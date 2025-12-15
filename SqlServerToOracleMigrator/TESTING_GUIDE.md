@@ -94,10 +94,11 @@ dotnet publish -c Release -o ./bin/Release/publish
 - 배치 크기: 1,000행
 - 트랜잭션 기반 처리
 
-### 시나리오 3: Excel 매핑 파일을 사용한 마이그레이션 (새 기능)
+### 시나리오 3: Excel 매핑 파일을 사용한 마이그레이션 (현재 주요 기능)
 - Excel 파일에 테이블 매핑 정보 저장
 - 여러 테이블을 한 번에 마이그레이션
 - 활성화/비활성화 제어 가능
+- **마이그레이션 통계 자동 기록** (시간, 상태, 성공/중복/전체 건수)
 
 #### 3-1: 샘플 Excel 파일 생성
 ```csharp
@@ -115,12 +116,87 @@ if (File.Exists(mappingFile))
 }
 ```
 
+#### 3-3: 마이그레이션 후 Excel 확인
+- **M열 (시작 시간)**: 각 테이블 마이그레이션 시작 시각
+- **N열 (완료 시간)**: 각 테이블 마이그레이션 완료 시각
+- **O열 (상태)**: "완료", "실패", "진행 중"
+- **P열 (소요 시간)**: 초 단위 소요 시간
+- **Q열 (성공 레코드 수)**: Oracle에 성공적으로 INSERT된 행 수
+- **R열 (오류 메시지)**: 실패 시 오류 내용
+- **T열 (중복 건너뜀)**: ORA-00001로 Skip된 행 수
+- **U열 (전체 처리)**: SQL Server에서 읽은 전체 행 수
+
+### 시나리오 4: 중복 데이터 처리 검증
+- Oracle에 중복 키가 존재하는 상황 시뮬레이션
+- 중복 발생 시 자동 Skip 확인
+- `DuplicateLogs` 폴더에 로그 파일 생성 확인
+
+#### 4-1: 테스트 데이터 준비
+```sql
+-- SQL Server에 중복 가능성 있는 데이터 삽입
+INSERT INTO dbo.TEST_TABLE (ID, NAME) VALUES (1, 'Test1');
+INSERT INTO dbo.TEST_TABLE (ID, NAME) VALUES (1, 'Test1'); -- 중복
+
+-- Oracle에 Primary Key 설정
+ALTER TABLE TEST_TABLE ADD CONSTRAINT PK_TEST PRIMARY KEY (ID);
+```
+
+#### 4-2: 마이그레이션 실행 및 확인
+```bash
+dotnet run
+# 콘솔에서 "Skipping duplicate row" 메시지 확인
+# DuplicateLogs/TEST_TABLE_20250101_duplicates.log 파일 확인
+```
+
+#### 4-3: 중복 로그 분석
+```json
+{
+  "Timestamp": "2025-01-01T10:30:00",
+  "Table": "TEST_TABLE",
+  "Data": {
+    "ID": 1,
+    "NAME": "Test1",
+    "INSDTTM": "2024-12-10 10:30:00.1234567"
+  },
+  "Analysis": {
+    "INSDTTM_Original": "2024-12-10 10:30:00.1234567",
+    "INSDTTM_ToChar_Simulated": "20241210103000123456700"
+  }
+}
+```
+
+### 시나리오 5: Primary Key 기반 정렬 검증
+- S열이 비어있을 때 자동 PK 조회 확인
+- S열에 수동 정렬 컬럼 지정 테스트
+
+#### 5-1: 자동 PK 조회 테스트
+```markdown
+Excel S열: (비워둠)
+기대 결과: 콘솔에 "Primary Key 조회 성공: HIST_SEQNO, INSDTTM, ZONEID" 메시지
+```
+
+#### 5-2: 수동 정렬 컬럼 지정 테스트
+```markdown
+Excel S열: "HIST_SEQNO, INSDTTM, ZONEID"
+기대 결과: 지정한 컬럼으로 ORDER BY 적용
+```
+
+#### 5-3: PK 조회 실패 시뮬레이션
+```sql
+-- SQL Server에서 PK가 없는 테이블 생성
+CREATE TABLE dbo.NO_PK_TABLE (Col1 INT, Col2 VARCHAR(50));
+```
+```markdown
+기대 결과: 콘솔에 "Primary Key 조회 실패" 경고, ORDER BY 1 사용
+```
+
 ### 시나리오 4: 대량 데이터 마이그레이션
 - 배치 크기를 5,000 이상으로 증가
 - `MigrationSettings:BatchSize` 수정
 
 ### 시나리오 5: 기존 데이터 재마이그레이션
-- `DeleteOracleTableAsync()` 호출하여 대상 테이블 초기화
+- Excel F열 (TruncateTarget)을 TRUE로 설정
+- 또는 `DeleteOracleTableAsync()` 호출하여 대상 테이블 초기화
 - 다시 마이그레이션 시작
 
 ## 마이그레이션 완료 후 검증
@@ -128,24 +204,26 @@ if (File.Exists(mappingFile))
 ### SQL Server에서 행 수 확인
 
 ```sql
-SELECT TABLE_NAME, 
-       (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES t WHERE t.TABLE_NAME = INFORMATION_SCHEMA.TABLES.TABLE_NAME) AS ROW_COUNT
-FROM INFORMATION_SCHEMA.TABLES
-WHERE TABLE_TYPE = 'BASE TABLE'
-ORDER BY TABLE_NAME
+-- 특정 테이블 행 수
+SELECT COUNT(*) FROM dbo.TEST_TABLE;
+
+-- 여러 테이블 행 수 한 번에
+SELECT 'Employees' as TableName, COUNT(*) as RowCount FROM dbo.Employees
+UNION ALL
+SELECT 'Departments', COUNT(*) FROM dbo.Departments
+UNION ALL
+SELECT 'Projects', COUNT(*) FROM dbo.Projects;
 ```
 
 ### Oracle에서 행 수 확인
 
 ```sql
+-- 테이블 통계 조회 (빠름, 근사치)
 SELECT table_name, num_rows 
 FROM user_tables 
 WHERE table_name IN ('EMPLOYEES', 'DEPARTMENTS', 'PROJECTS');
-```
 
-또는
-
-```sql
+-- 실제 행 수 카운트 (정확)
 SELECT 'EMPLOYEES' as table_name, COUNT(*) as num_rows FROM EMPLOYEES
 UNION ALL
 SELECT 'DEPARTMENTS', COUNT(*) FROM DEPARTMENTS
@@ -153,28 +231,76 @@ UNION ALL
 SELECT 'PROJECTS', COUNT(*) FROM PROJECTS;
 ```
 
-## 성능 튜닝
+### Excel 파일에서 통계 확인
+1. `TableMapping.xlsx` 파일 열기
+2. 각 테이블별로 확인:
+   - **Q열 (성공 레코드 수)**: Oracle에 INSERT된 행 수
+   - **T열 (중복 건너뜀)**: 중복으로 Skip된 행 수
+   - **U열 (전체 처리)**: SQL Server에서 읽은 총 행 수
+   - **수식 검증**: U = Q + T (전체 = 성공 + 중복)
 
-### 1. 배치 크기 최적화
-- 작은 배치 (100-500): 안정성 중심, 느린 속도
-- 중간 배치 (1,000-5,000): 권장 설정
-- 큰 배치 (10,000+): 고속, 높은 메모리 사용
+### 중복 데이터 검증
+```bash
+# DuplicateLogs 폴더에서 중복 로그 파일 확인
+dir DuplicateLogs
 
-### 2. 타임아웃 조정
-- 기본값: 300초
-- 대량 데이터: 600-1200초로 증가
-- `appsettings.json` 수정: `"CommandTimeout": 600`
-
-### 3. Oracle 인덱스 비활성화
-```sql
--- 마이그레이션 전
-ALTER INDEX idx_name UNUSABLE;
-
--- 마이그레이션 후
-ALTER INDEX idx_name REBUILD;
+# 로그 파일 내용 확인 (JSON 형식)
+type DuplicateLogs\TEST_TABLE_20250101_duplicates.log
 ```
 
+## 성능 튜닝
+
 ## 문제 해결
+
+### "Could not open a connection to SQL Server"
+- SQL Server가 실행 중인지 확인
+- 연결 문자열의 서버 이름 확인
+- 방화벽 포트 (기본: 1433) 확인
+
+### "ORA-12514: TNS:listener could not resolve the connect identifier"
+- Oracle TNS 이름 또는 호스트 확인
+- Oracle listener 실행 상태 확인
+- `tnsnames.ora` 파일 확인
+
+### "Timeout expired"
+- `CommandTimeout` 증가
+- 배치 크기 감소
+- 대역폭 확인
+
+### 데이터 타입 불일치
+- Oracle 테이블의 컬럼 타입과 SQL Server 소스 확인
+- `MigrationService.cs`의 타입 매핑 로직 검토
+
+### "ORA-00001: unique constraint violated" (중복 키 오류)
+- **자동 처리**: 프로그램이 자동으로 해당 행을 Skip하고 계속 진행
+- **로그 확인**: `DuplicateLogs` 폴더에서 중복 데이터 확인
+- **Excel 확인**: T열에서 중복 건너뛴 행 수 확인
+- **근본 원인 분석**:
+  1. SQL Server와 Oracle의 Primary Key 정의 불일치
+  2. INSDTTM 같은 시간 컬럼의 정밀도 차이
+  3. 정렬 컬럼 (S열) 누락 또는 불완전
+
+### "Primary Key 조회 실패" 경고
+- **증상**: 콘솔에 "Primary Key 조회 실패" 메시지 출력
+- **영향**: ORDER BY 1 사용으로 배치 간 중복 위험
+- **해결 방법**:
+  1. Excel S열에 수동으로 정렬 컬럼 지정 (예: `HIST_SEQNO, INSDTTM, ZONEID`)
+  2. SQL Server 테이블에 Primary Key 정의 추가
+  3. 정렬이 중요하지 않은 테이블은 무시
+
+### Excel 파일 업데이트 실패
+- **증상**: "파일이 다른 프로세스에서 사용 중" 오류
+- **해결 방법**:
+  1. Excel 파일을 닫고 다시 실행
+  2. Excel 프로세스가 백그라운드에서 실행 중인지 확인 (작업 관리자)
+  3. 프로그램 종료 후 Excel 파일 확인 (finally 블록에서 자동 저장)
+
+### 배치 처리가 느려짐 또는 멈춤
+- **원인**: REPEATABLEREAD 격리 수준으로 인한 잠금 대기
+- **해결 방법**:
+  1. SQL Server의 활성 트랜잭션 확인 및 종료
+  2. 배치 크기 줄이기 (`BatchSize`: 1000 → 500)
+  3. 데이터베이스 활동이 적은 시간대에 마이그레이션 실행
 
 ### "Could not open a connection to SQL Server"
 - SQL Server가 실행 중인지 확인
