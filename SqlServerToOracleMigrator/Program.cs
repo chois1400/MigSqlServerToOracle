@@ -229,16 +229,22 @@ try
                 }
                 else
                 {
-                    await migrationService.MigrateWithMappingAsync(mappings);
-                    
-                    // 마이그레이션 완료 후 Excel 파일에 시간 정보 기록
                     try
                     {
-                        mappingReader.UpdateMigrationTimes(mappingFileToUse, mappings);
+                        await migrationService.MigrateWithMappingAsync(mappings);
                     }
-                    catch (Exception ex)
+                    finally
                     {
-                        logger.LogWarning($"Excel 파일 업데이트 중 오류: {ex.Message}");
+                        // 마이그레이션 성공/실패 여부와 관계없이 Excel 파일에 시간 정보 기록
+                        try
+                        {
+                            mappingReader.UpdateMigrationTimes(mappingFileToUse, mappings);
+                            logger.LogInformation("Excel 파일 업데이트 완료");
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError($"Excel 파일 업데이트 중 오류: {ex.Message}");
+                        }
                     }
                 }
             }
@@ -384,7 +390,18 @@ catch (Exception ex)
 {
     logger.LogError($"Unexpected error: {ex.Message}");
     logger.LogError($"Stack trace: {ex.StackTrace}");
+    
+    // 로그 출력 완료를 보장하기 위해 짧은 대기
+    await Task.Delay(500);
+    Console.Out.Flush();
+    Console.Error.Flush();
+    
     Environment.Exit(1);
 }
 
 logger.LogInformation("Program completed");
+
+// 프로그램 종료 전 로그 출력 완료 보장
+await Task.Delay(500);
+Console.Out.Flush();
+Console.Error.Flush();

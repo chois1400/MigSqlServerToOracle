@@ -94,9 +94,32 @@ public class TableMapping
     public string Status { get; set; } = "대기";
 
     /// <summary>
-    /// 이전한 레코드 개수
+    /// 이전한 레코드 개수 (성공)
     /// </summary>
     public int RecordCount { get; set; } = 0;
+
+    /// <summary>
+    /// 중복으로 건너뛴 레코드 개수
+    /// </summary>
+    public int SkippedCount { get; set; } = 0;
+
+    /// <summary>
+    /// 처리 시도한 전체 레코드 개수
+    /// </summary>
+    public int TotalProcessed { get; set; } = 0;
+
+    /// <summary>
+    /// 마이그레이션 실패 사유 (오류 메시지)
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// 배치 처리 시 정렬에 사용할 컬럼명 (쉼표로 구분)
+    /// 예: "EQPTID,EIO_CONTROL_STAT_CODE" 
+    /// 비어있으면 Primary Key를 자동으로 조회합니다.
+    /// Excel의 S열에 지정합니다.
+    /// </summary>
+    public string? OrderByColumns { get; set; }
 
     public override string ToString()
     {

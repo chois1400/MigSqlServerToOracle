@@ -170,6 +170,9 @@ public class TableMappingReader
                             _logger.LogWarning($"행 {rowNumber}: 추가 컬럼 개수({additionalColumns.Count})와 값 개수({additionalColumnsValues.Count})가 다릅니다. 개수가 적은 만큼만 적용됩니다.");
                         }
 
+                        // S열: 정렬에 사용할 컬럼명 (쉼표로 구분, 비어있으면 자동으로 PK 조회)
+                        var orderByColumns = row.Cell(19).IsEmpty() ? null : row.Cell(19).GetString().Trim();
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
@@ -183,6 +186,7 @@ public class TableMappingReader
                             EmptyValueReplacement = emptyValueReplacement,
                             AdditionalColumns = additionalColumns,
                             AdditionalColumnsValues = additionalColumnsValues,
+                            OrderByColumns = orderByColumns,
                             ExcelRowNumber = rowNumber
                         };
 
@@ -360,7 +364,7 @@ public class TableMappingReader
 
     /// <summary>
     /// Excel 파일에 마이그레이션 시간 정보를 기록합니다.
-    /// M열: 시작 시간, N열: 완료 시간, O열: 상태, P열: 소요 시간, Q열: 이전 레코드 개수
+    /// M열: 시작 시간, N열: 완료 시간, O열: 상태, P열: 소요 시간, Q열: 이전 레코드 개수, R열: 오류 메시지
     /// </summary>
     public void UpdateMigrationTimes(string filePath, List<TableMapping> mappings)
     {
@@ -373,7 +377,8 @@ public class TableMappingReader
             }
 
             // 임시 파일에 작업한 후 원본 파일로 덮어쓰기
-            string tempPath = Path.GetTempFileName();
+            // .xlsx 확장자를 가진 임시 파일 생성 (ClosedXML은 .tmp 확장자를 지원하지 않음)
+            string tempPath = Path.Combine(Path.GetTempPath(), $"TableMapping_{Guid.NewGuid()}.xlsx");
             
             try
             {
@@ -381,7 +386,7 @@ public class TableMappingReader
                 {
                     var worksheet = workbook.Worksheets.First();
                     
-                    // 헤더 설정 (M, N, O, P, Q 열)
+                    // 헤더 설정 (M, N, O, P, Q, R 열)
                     if (worksheet.Cell(1, 13).IsEmpty())
                     {
                         worksheet.Cell(1, 13).Value = "시작 시간";
@@ -389,11 +394,13 @@ public class TableMappingReader
                         worksheet.Cell(1, 15).Value = "상태";
                         worksheet.Cell(1, 16).Value = "소요 시간";
                         worksheet.Cell(1, 17).Value = "이전 레코드 수";
+                        worksheet.Cell(1, 18).Value = "오류 메시지";
                         worksheet.Cell(1, 13).Style.Font.Bold = true;
                         worksheet.Cell(1, 14).Style.Font.Bold = true;
                         worksheet.Cell(1, 15).Style.Font.Bold = true;
                         worksheet.Cell(1, 16).Style.Font.Bold = true;
                         worksheet.Cell(1, 17).Style.Font.Bold = true;
+                        worksheet.Cell(1, 18).Style.Font.Bold = true;
                     }
 
                     foreach (var mapping in mappings)
@@ -402,32 +409,73 @@ public class TableMappingReader
                         {
                             int row = mapping.ExcelRowNumber;
                             
+                            // "대기" 상태이고 아무 데이터도 없는 경우 건너뛰기
+                            if (string.IsNullOrWhiteSpace(mapping.Status) || mapping.Status == "대기")
+                            {
+                                if (!mapping.StartTime.HasValue && !mapping.EndTime.HasValue && 
+                                    mapping.RecordCount == 0 && mapping.SkippedCount == 0 && mapping.TotalProcessed == 0 &&
+                                    string.IsNullOrWhiteSpace(mapping.ErrorMessage))
+                                {
+                                    _logger.LogDebug($"[UpdateMigrationTimes] Row {row}: 대기 상태로 업데이트 건너뜀");
+                                    continue;
+                                }
+                            }
+                            
+                            _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: Status={mapping.Status}, StartTime={mapping.StartTime}, EndTime={mapping.EndTime}, RecordCount={mapping.RecordCount}, SkippedCount={mapping.SkippedCount}, TotalProcessed={mapping.TotalProcessed}");
+                            
                             // M열: 시작 시간
                             if (mapping.StartTime.HasValue)
                             {
                                 worksheet.Cell(row, 13).Value = mapping.StartTime.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                                _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: M열(시작시간) 저장 = {mapping.StartTime.Value:yyyy-MM-dd HH:mm:ss}");
                             }
                             
                             // N열: 완료 시간
                             if (mapping.EndTime.HasValue)
                             {
                                 worksheet.Cell(row, 14).Value = mapping.EndTime.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                                _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: N열(완료시간) 저장 = {mapping.EndTime.Value:yyyy-MM-dd HH:mm:ss}");
                                 
-                                // 소요 시간 계산
+                                // P열: 소요 시간 계산
                                 if (mapping.StartTime.HasValue)
                                 {
                                     var duration = mapping.EndTime.Value - mapping.StartTime.Value;
                                     worksheet.Cell(row, 16).Value = $"{duration.TotalSeconds:F2}초";
+                                    _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: P열(소요시간) 저장 = {duration.TotalSeconds:F2}초");
                                 }
                             }
                             
                             // O열: 상태
-                            worksheet.Cell(row, 15).Value = mapping.Status;
+                            worksheet.Cell(row, 15).Value = mapping.Status ?? "";
+                            _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: O열(상태) 저장 = {mapping.Status}");
                             
-                            // Q열: 이전 레코드 개수
-                            if (mapping.RecordCount > 0)
+                            // Q열: 이전 레코드 개수 (성공)
+                            // RecordCount가 0이어도 저장 (0개 이전도 결과이므로)
+                            if (mapping.Status == "완료" || mapping.Status == "실패" || mapping.RecordCount >= 0)
                             {
                                 worksheet.Cell(row, 17).Value = mapping.RecordCount;
+                                _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: Q열(레코드수) 저장 = {mapping.RecordCount}");
+                            }
+                            
+                            // R열: 오류 메시지
+                            if (!string.IsNullOrWhiteSpace(mapping.ErrorMessage))
+                            {
+                                worksheet.Cell(row, 18).Value = mapping.ErrorMessage;
+                                _logger.LogInformation($"[UpdateMigrationTimes] Row {row}: R열(오류메시지) 저장");
+                            }
+                            
+                            // T열: 중복 건너뜀 개수
+                            // 0이어도 저장 (중복이 없었다는 정보도 중요)
+                            if (mapping.Status == "완료" || mapping.Status == "실패" || mapping.SkippedCount >= 0)
+                            {
+                                worksheet.Cell(row, 20).Value = mapping.SkippedCount;
+                            }
+                            
+                            // U열: 전체 처리 개수
+                            // 0이어도 저장
+                            if (mapping.Status == "완료" || mapping.Status == "실패" || mapping.TotalProcessed >= 0)
+                            {
+                                worksheet.Cell(row, 21).Value = mapping.TotalProcessed;
                             }
                             
                             // 상태에 따라 색상 지정
@@ -457,19 +505,31 @@ public class TableMappingReader
                 
                 _logger.LogInformation($"마이그레이션 시간 정보를 Excel 파일에 기록했습니다: {filePath}");
             }
-            catch
+            catch (Exception innerEx)
             {
                 // 임시 파일 정리
                 if (File.Exists(tempPath))
                 {
                     try { File.Delete(tempPath); } catch { }
                 }
+                
+                _logger.LogError($"Excel 파일 저장 중 오류 발생: {innerEx.Message}");
+                _logger.LogError($"StackTrace: {innerEx.StackTrace}");
                 throw;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            _logger.LogError($"Excel 파일 업데이트 중 오류 발생");
+            _logger.LogError($"========== Excel 파일 업데이트 중 오류 발생 ==========");
+            _logger.LogError($"파일: {filePath}");
+            _logger.LogError($"오류 타입: {ex.GetType().Name}");
+            _logger.LogError($"오류 메시지: {ex.Message}");
+            _logger.LogError($"StackTrace: {ex.StackTrace}");
+            if (ex.InnerException != null)
+            {
+                _logger.LogError($"InnerException: {ex.InnerException.Message}");
+            }
+            _logger.LogError($"===================================================");
         }
     }
 }
