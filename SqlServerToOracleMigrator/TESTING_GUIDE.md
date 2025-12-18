@@ -131,6 +131,18 @@ if (File.Exists(mappingFile))
 - 중복 발생 시 자동 Skip 확인
 - `DuplicateLogs` 폴더에 로그 파일 생성 확인
 
+#### 4-0: Oracle PK 전체 사용 검증 (Excel V열 지정/자동 추출)
+- 목적: 중복 판단과 기존행 조회가 "전체 PK 컬럼"을 사용함을 검증
+- 단계:
+  1. Excel 매핑의 `V`열에 대상 테이블의 PK 전체 컬럼을 입력합니다. 예: `ZONEID,TRANSACTION_SERIAL_NO`
+    - 비워둘 경우 프로그램이 Oracle 메타데이터(OWNER+TABLE 기준)에서 자동 추출합니다.
+  2. 마이그레이션 실행 후 `DuplicateLogs/{TABLE}_YYYYMMDD_duplicates.log`를 확인합니다.
+  3. 각 로그 라인에서 다음을 확인합니다:
+    - `ResolvedOraclePkTargets`가 PK 전체 컬럼을 모두 포함
+    - `ExistingOracleWhere`와 `ExistingOracleSelect`에 PK 전체 컬럼이 AND로 결합되어 있음
+    - `AttemptedInsertSql`와 `AttemptedInsertParams`가 존재하며 SELECT에도 동일 파라미터가 바인딩됨
+  4. 실제 중복 시 `ExistingOracleRowsCount`가 1 이상, 중복이 아니면 0임을 확인합니다.
+
 #### 4-1: 테스트 데이터 준비
 ```sql
 -- SQL Server에 중복 가능성 있는 데이터 삽입
@@ -162,6 +174,17 @@ dotnet run
     "INSDTTM_Original": "2024-12-10 10:30:00.1234567",
     "INSDTTM_ToChar_Simulated": "20241210103000123456700"
   }
+}
+```
+
+#### 4-4: PK 전체 컬럼 조회 예시 (로그 필드 발췌)
+```json
+{
+  "ResolvedOraclePkTargets": ["ZONEID", "TRANSACTION_SERIAL_NO"],
+  "ExistingOracleWhere": "\"ZONEID\" = :k0 AND \"TRANSACTION_SERIAL_NO\" = TO_CHAR(:p5,'YYYYMMDDHHMMSSF9')",
+  "ExistingOracleSelect": "SELECT * FROM TB_MCS_STK_ZONE_HIST WHERE \"ZONEID\" = :k0 AND \"TRANSACTION_SERIAL_NO\" = TO_CHAR(:p5,'YYYYMMDDHHMMSSF9') FETCH FIRST 5 ROWS ONLY",
+  "AttemptedInsertSql": "INSERT INTO TB_MCS_STK_ZONE_HIST (\"ZONEID\",\"TRANSACTION_SERIAL_NO\",...) VALUES (:p0, TO_CHAR(:p5,'YYYYMMDDHHMMSSF9'), ...)",
+  "AttemptedInsertParams": {":p0":"A7STKA1Z0001",":p5":"2025-11-03T10:33:12.39"}
 }
 ```
 

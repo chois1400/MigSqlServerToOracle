@@ -173,6 +173,15 @@ public class TableMappingReader
                         // S열: 정렬에 사용할 컬럼명 (쉼표로 구분, 비어있으면 자동으로 PK 조회)
                         var orderByColumns = row.Cell(19).IsEmpty() ? null : row.Cell(19).GetString().Trim();
 
+                        // V열: Oracle PK 컬럼 목록 (쉼표로 구분)
+                        var oraclePkColumns = new List<string>();
+                        var oraclePkCell = row.Cell(22).IsEmpty() ? null : row.Cell(22).GetString().Trim();
+                        if (!string.IsNullOrWhiteSpace(oraclePkCell))
+                        {
+                            var cols = oraclePkCell.Split(',').Select(c => c.Trim()).Where(c => !string.IsNullOrWhiteSpace(c));
+                            oraclePkColumns.AddRange(cols);
+                        }
+
                         var mapping = new TableMapping
                         {
                             SqlServerTableName = sqlServerTable,
@@ -187,6 +196,7 @@ public class TableMappingReader
                             AdditionalColumns = additionalColumns,
                             AdditionalColumnsValues = additionalColumnsValues,
                             OrderByColumns = orderByColumns,
+                            OraclePkColumns = oraclePkColumns,
                             ExcelRowNumber = rowNumber
                         };
 
@@ -299,6 +309,12 @@ public class TableMappingReader
                 worksheet.Column(10).Width = 20;
                 worksheet.Column(11).Width = 40;
                 worksheet.Column(12).Width = 40;
+                worksheet.Column(22).Width = 36;
+
+                // 추가 헤더: V열에 Oracle PK 컬럼 입력란 제공
+                var ws = workbook.Worksheets.First();
+                ws.Cell(1, 22).Value = "Oracle PK Columns (쉼표)";
+                ws.Cell(1, 22).Style.Font.Bold = true;
 
                 workbook.SaveAs(filePath);
                 _logger.LogInformation($"샘플 매핑 파일이 생성되었습니다: {filePath}");

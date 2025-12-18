@@ -21,6 +21,7 @@ string? GetArgValue(string name)
 var configArg = GetArgValue("config") ?? GetArgValue("c");
 var mappingArg = GetArgValue("mapping") ?? GetArgValue("m");
 var dryRunLocal = args.Contains("--dry-run-local");
+var incrementalFlag = args.Contains("--incremental") || args.Contains("--merge") || args.Contains("--upsert");
 var createSampleFlag = args.Contains("--create-sample") || args.Contains("-s");
 var sampleRowCountStr = GetArgValue("sample") ?? GetArgValue("sample");
 int sampleRowCount = 3; // default
@@ -231,7 +232,8 @@ try
                 {
                     try
                     {
-                        await migrationService.MigrateWithMappingAsync(mappings);
+                        logger.LogInformation(incrementalFlag ? "증분 적재 모드(MERGE) 활성화" : "전체 적재 모드(INSERT) 활성화");
+                        await migrationService.MigrateWithMappingAsync(mappings, incrementalFlag);
                     }
                     finally
                     {

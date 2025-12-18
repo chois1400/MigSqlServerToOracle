@@ -100,6 +100,11 @@ mappingReader.CreateSampleMappingFile(mappingFilePath);
   - 예: `EMP_ID,EMP_NAME,HIRE_DT`
   - G열과 같은 개수의 컬럼명을 쉼표로 구분하여 입력
   - G열과 H열이 모두 입력되면 해당 매핑이 적용됨
+- **V열**: Oracle PK Columns (중복 체크용 대상 PK 컬럼)
+  - 예: `ZONEID,TRANSACTION_SERIAL_NO`
+  - 이 열에 지정된 컬럼들은 Oracle의 대상 테이블에서 중복 존재 여부를 확인하는 WHERE의 키로 "반드시 모두" 사용됩니다.
+  - 비워두면, 프로그램이 Oracle 메타데이터(OWNER+TABLE 기준)에서 Primary Key 전체 컬럼을 자동 추출하여 사용합니다.
+  - H열(Oracle 컬럼명)과 달리, V열은 "중복 조회 및 MERGE ON" 키 결정에만 사용되며 INSERT 컬럼과 무관하게 전체 PK를 강제 포함합니다.
 - **I열**: EmptyToDashColumns - 공백값을 '-'로 대체할 SQL Server 컬럼명 목록 (선택사항, 쉼표로 구분)
   - 예: `EmployeeName,Address`
   - SQL Server의 해당 컬럼 값이 공백(또는 공백만 포함)인 경우 Oracle에 `-`로 저장됨
@@ -398,6 +403,14 @@ dotnet run --configuration Debug
 - **파일명**: `테이블명_YYYYMMDD_duplicates.log`
 - **형식**: JSON Lines (한 줄에 하나의 JSON 객체)
 - **내용**: 
+  - Keys: 중복 판단에 사용된 키 구성(Target/Source/Value)
+  - ExistingOracleWhere: Oracle에서 기존 행 조회에 사용된 WHERE (전체 PK 반영)
+  - ExistingOracleSelect: 위 WHERE로 만드는 SELECT 문 (최대 5행 미리보기)
+  - AttemptedInsertSql: 실제로 실행하려던 INSERT/MERGE SQL
+  - AttemptedInsertParams: INSERT/MERGE에 바인딩된 파라미터 스냅샷
+  - ResolvedOraclePkTargets: 최종적으로 사용된 Oracle PK 타깃 컬럼 목록
+  - ResolvedSourceCols: 각 타깃 컬럼에 대해 소스에서 추출된 컬럼명(가능한 경우)
+  - ConstraintName: ORA-00001에 포함된 제약조건명(있다면)
   - Timestamp: 중복 발생 시각
   - Table: 테이블명
   - Data: SQL Server에서 읽은 모든 컬럼 데이터

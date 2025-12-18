@@ -121,6 +121,14 @@ public class TableMapping
     /// </summary>
     public string? OrderByColumns { get; set; }
 
+    /// <summary>
+    /// Oracle 테이블의 PK 컬럼 목록을 Excel에서 명시적으로 지정할 수 있습니다.
+    /// 예: "ZONEID,TRANSACTION_SERIAL_NO"
+    /// 지정하지 않으면 Oracle 메타데이터/제약조건을 통해 자동 판별합니다.
+    /// Excel의 V열에 지정합니다.
+    /// </summary>
+    public List<string> OraclePkColumns { get; set; } = new();
+
     public override string ToString()
     {
         var wherePart = string.IsNullOrWhiteSpace(WhereCondition) ? string.Empty : $" WHERE: {WhereCondition}";
