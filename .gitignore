@@ -52,3 +52,6 @@ packages/
 # Local environment
 appsettings.local.json
 appsettings.Development.json
+
+# Archives
+*.zip
