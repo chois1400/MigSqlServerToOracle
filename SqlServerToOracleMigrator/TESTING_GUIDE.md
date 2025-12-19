@@ -131,6 +131,18 @@ if (File.Exists(mappingFile))
 - 중복 발생 시 자동 Skip 확인
 - `DuplicateLogs` 폴더에 로그 파일 생성 확인
 
+#### 4-0: TRANSACTION_SERIAL_NO를 K/L로 구성하여 중복 회피
+- 목적: `TRANSACTION_SERIAL_NO`를 `INSDTTM + HIST_SEQNO` 조합으로 만들어 중복을 회피합니다.
+- Excel 설정:
+  - K열: `TRANSACTION_SERIAL_NO`
+  - L열: `TO_CHAR({INSDTTM}, 'YYYYMMDDHH24MISSFF9') || LPAD(TO_CHAR({HIST_SEQNO}), 12, '0')`
+  - 주의: `TRANSACTION_SERIAL_NO`는 G/H 매핑에 넣지 않습니다. 동일 타깃 컬럼 중복 금지.
+  - 참고: `{HIST_SEQNO}`는 H열에 없어도 자동으로 :pN 파라미터가 생성되어 값 바인딩됩니다.
+- 검증:
+  - 실행 후 `DuplicateLogs`의 `AttemptedInsertSql`에 위 식이 반영되어 있는지 확인
+  - `AttemptedInsertParams`에 `{INSDTTM}`, `{HIST_SEQNO}` 파라미터 값 존재 확인
+  - ORA-01006가 발생하지 않는지 확인
+
 #### 4-0: Oracle PK 전체 사용 검증 (Excel V열 지정/자동 추출)
 - 목적: 중복 판단과 기존행 조회가 "전체 PK 컬럼"을 사용함을 검증
 - 단계:
@@ -178,6 +190,13 @@ dotnet run
 ```
 
 #### 4-4: PK 전체 컬럼 조회 예시 (로그 필드 발췌)
+#### 4-5: ORA-01006(bind variable) 진단
+- 증상: `bind variable does not exist`
+- 체크리스트:
+  - L열의 `{Col}` 토큰이 실제로 :pN으로 치환되어 있는지 (`AttemptedInsertSql`)
+  - 해당 :pN이 `AttemptedInsertParams`에 존재하는지
+  - 동일 타깃 컬럼이 G/H와 K에 중복되지 않았는지(ORA-00957 회피)
+  - `BindByName = true`가 적용되어 이름으로 바인딩되었는지(내부 구현)
 ```json
 {
   "ResolvedOraclePkTargets": ["ZONEID", "TRANSACTION_SERIAL_NO"],

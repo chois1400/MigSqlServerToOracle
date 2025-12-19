@@ -257,6 +257,28 @@ dotnet run --configuration Debug
 | T | 중복 건너뜀 | 중복으로 Skip된 레코드 수 | 자동 기록 | 50 |
 | U | 전체 처리 | SQL Server에서 읽은 전체 레코드 수 | 자동 기록 | 10050 |
 
+### TRANSACTION_SERIAL_NO 구성 (중복 회피용)
+- 목적: Oracle 테이블에 `TRANSACTION_SERIAL_NO (VARCHAR2(50))`가 있을 때, SQL Server의 `INSDTTM`과 `HIST_SEQNO` 조합으로 고유 식별자를 생성하여 중복을 회피합니다.
+- 설정 예시:
+  - K열: `TRANSACTION_SERIAL_NO`
+  - L열: `TO_CHAR({INSDTTM}, 'YYYYMMDDHH24MISSFF9') || LPAD(TO_CHAR({HIST_SEQNO}), 12, '0')`
+    - 변형: `NVL(LPAD(TO_CHAR({HIST_SEQNO}), 12, '0'), '')`로 널 방어 가능
+    - 구분자 필요 시: `|| '_' ||` 등 추가 가능
+- 중요:
+  - `HIST_SEQNO`는 H열(타깃 매핑)에 없어도 됩니다. L열의 `{HIST_SEQNO}` 토큰은 자동으로 `:pN` 파라미터가 생성되어 값이 바인딩됩니다.
+  - `TRANSACTION_SERIAL_NO`는 G/H 매핑에 넣지 말고 K/L로만 추가하세요. 동일 타깃 컬럼이 두 번 나오면 ORA-00957(duplicate column name)이 발생합니다.
+
+### PK 전체 컬럼으로 중복 조회 (V열)
+- V열에 Oracle PK 전체 컬럼을 입력하면, 중복 검증과 로그의 `ExistingOracleSelect`가 반드시 모든 PK를 포함합니다.
+- 비워둘 경우 OWNER+TABLE 기준으로 Oracle 메타데이터에서 PK 전체 컬럼을 자동 추출하여 사용합니다.
+
+### ORA-01006(bind variable does not exist) 방지
+- 원인: L열 식의 `{Col}` 토큰이 파라미터로 치환되지 않거나 이름/순서 불일치.
+- 해결:
+  - L열의 `{INSDTTM}`, `{HIST_SEQNO}` 등 토큰은 자동으로 `:pN`으로 치환되고 값이 바인딩됩니다(매핑에 없어도 OK).
+  - 내부적으로 `BindByName = true`로 이름 바인딩을 강제합니다.
+  - 동일 타깃 컬럼의 중복(예: G/H에 `TRANSACTION_SERIAL_NO` + K에도 `TRANSACTION_SERIAL_NO`)을 피하세요.
+
 ### 사용 시나리오
 
 **시나리오 1: 신규 데이터 마이그레이션 (기존 데이터 덮어쓰기)**
